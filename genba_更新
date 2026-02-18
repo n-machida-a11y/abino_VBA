@@ -2,7 +2,7 @@ Option Explicit
 
 '--- 初期設定 ---
 ' Trueにすると、下のテスト用ファイルパスが使われる（開発者向け）
-Private Const IS_TEST_MODE As Boolean = False
+Private Const IS_TEST_MODE As Boolean = True
 ' テスト時に使用する「工事番号管理表.xlsm」の場所
 Private Const m_TEST_FILE_PATH_FOR_TEST As String = "Z:\Users\n-machida\Desktop\工事番号管理表.xlsm"
 
@@ -303,6 +303,8 @@ Private Function SheetExists(ByVal wb As Workbook, ByVal sheetName As String) As
     On Error GoTo 0
     SheetExists = Not ws Is Nothing
 End Function
+
+
 
 
 
