@@ -1,0 +1,549 @@
+Option Explicit
+
+'--- 初期設定 ---
+' Trueにすると、下のテスト用ファイルパスが使われる（開発者向け）
+Private Const IS_TEST_MODE As Boolean = True
+' テスト時に使用する「工事番号管理表.xlsm」の場所
+Private Const m_TEST_FILE_PATH As String = "Z:\Users\n-machida\Desktop\工事番号管理表.xlsm"
+
+' シート保護用のパスワード（現在は未使用のため空欄）
+Private Const SHEET_PASSWORD As String = ""
+
+'--- プログラム内で固定的に使う文字（定数） ---
+' ※後からシート名や列が変更になっても、ここの修正だけで済むようにするため
+Private Const m_KANRI_MASTER_NAME As String = "管理マスタ"
+Private Const m_PATH_CELL As String = "A36"
+Private Const COL_YEAR As String = "A"
+Private Const COL_NO As String = "B"
+Private Const COL_STAFF As String = "C"
+Private Const COL_KOUJI_BANGO As String = "D"
+Private Const COL_KOUJI_NAME As String = "E"
+Private Const MASTER_COL_STAFF_NAME As String = "A"
+Private Const MASTER_COL_STAFF_NO As String = "B"
+Private Const MASTER_TARGET_SHEET_NAME_CELL As String = "G3"
+
+'--- データを一時保存しておくための変数（キャッシュ） ---
+' ※毎回ファイルを読みに行くと時間がかかるため、一度読み込んだデータを使いまわす目的
+Private m_CachedStaffList As Variant ' 担当者リストを一時保存
+Private m_CachedTargetSheetName As String ' 転記先シート名を一時保存
+
+Private Sub Label13_Click()
+
+End Sub
+
+'================================================================================
+' ユーザーフォームが開かれたときに最初に実行される処理
+'================================================================================
+Private Sub UserForm_Initialize()
+    Dim wbTarget_Init As Workbook
+    Dim wsMaster_Init As Worksheet
+    Dim targetFilePath As String
+    Dim originalDisplayAlerts As Boolean
+    Dim originalEnableEvents As Boolean ' イベント設定を一時的に保持する変数
+
+    ' --- 処理中の画面のちらつきや不要なメッセージを抑制し、高速化 ---
+    Application.ScreenUpdating = False ' 画面更新を停止
+    originalDisplayAlerts = Application.DisplayAlerts ' 現在の警告メッセージ設定を記憶
+    Application.DisplayAlerts = False ' 警告メッセージを非表示に
+    originalEnableEvents = Application.EnableEvents ' 現在のイベント設定を記憶
+    Application.EnableEvents = False ' イベントを一時的に無効化
+
+    ' エラーが発生した場合は「ErrorHandlerInit」へジャンプ
+    On Error GoTo ErrorHandlerInit
+
+    ' --- キャッシュデータ（一時保存されたデータ）の確認 ---
+    ' もし既に見積担当者リストが読み込み済みなら、それを使ってファイルを開かずに処理を終える
+    If Not IsEmpty(m_CachedStaffList) Then
+        Me.担当者.List = m_CachedStaffList
+        GoTo FinalizeInitWithoutFileOpen ' ファイルを開かない場合の終了処理へ
+    End If
+
+    ' --- 外部のExcelファイルを開き、必要なデータを取得 ---
+    ' テストモードかどうかで、参照するファイルパスを切り替える
+    If IS_TEST_MODE Then
+        targetFilePath = m_TEST_FILE_PATH
+    Else
+        targetFilePath = Trim(CStr(ThisWorkbook.Sheets("入力フォーム").Range(m_PATH_CELL).Value))
+    End If
+
+    ' 指定されたパスにファイルが存在するかチェック
+    If Dir(targetFilePath) = "" Then
+        MsgBox "対象のファイルが見つかりません。" & vbCrLf & targetFilePath, vbCritical
+        Unload Me ' フォームを閉じる
+        GoTo FinalizeInit ' 終了処理へ
+    End If
+
+    ' リンクを更新せず、読み取り専用でファイルを開く（高速化のため）
+    Set wbTarget_Init = Application.Workbooks.Open(fileName:=targetFilePath, ReadOnly:=True, UpdateLinks:=0)
+
+    ' 開いたファイルに「管理マスタ」シートが存在するかチェック
+    If Not SheetExists(wbTarget_Init, m_KANRI_MASTER_NAME) Then
+        MsgBox "参照先のファイルに「" & m_KANRI_MASTER_NAME & "」が見つかりません。", vbCritical, "シートエラー"
+        GoTo FinalizeInit
+    End If
+
+    Set wsMaster_Init = wbTarget_Init.Sheets(m_KANRI_MASTER_NAME)
+
+    ' 「管理マスタ」から転記先のシート名を取得し、キャッシュ用の変数に保存
+    m_CachedTargetSheetName = Trim(CStr(wsMaster_Init.Range(MASTER_TARGET_SHEET_NAME_CELL).Value))
+    ' シート名が空欄の場合はエラー
+    If m_CachedTargetSheetName = "" Then
+        MsgBox "「" & m_KANRI_MASTER_NAME & "」シートの" & MASTER_TARGET_SHEET_NAME_CELL & "セルに対象シート名が指定されていません。", vbCritical, "設定エラー"
+        GoTo FinalizeInit
+    End If
+
+    ' 取得したシート名がファイル内に実際に存在するかチェック
+    If Not SheetExists(wbTarget_Init, m_CachedTargetSheetName) Then
+        MsgBox "参照先のファイルに「" & m_CachedTargetSheetName & "」が見つかりません。", vbCritical, "シートエラー"
+        GoTo FinalizeInit
+    End If
+
+    ' 「管理マスタ」から担当者リストを読み込み、キャッシュ用の変数に保存
+    Me.担当者.Clear
+    m_CachedStaffList = wsMaster_Init.Range( _
+        wsMaster_Init.Cells(2, MASTER_COL_STAFF_NAME), _
+        wsMaster_Init.Cells(wsMaster_Init.Rows.count, MASTER_COL_STAFF_NAME).End(xlUp) _
+    ).Value
+    ' フォームのドロップダウンリストに担当者一覧を設定
+    Me.担当者.List = m_CachedStaffList
+
+FinalizeInit: ' 終了処理（ファイルを開いた場合）
+    ' 開いたオブジェクトを解放（メモリをクリーンにする）
+    If Not wsMaster_Init Is Nothing Then Set wsMaster_Init = Nothing
+    If Not wbTarget_Init Is Nothing Then
+        wbTarget_Init.Close SaveChanges:=False ' ブックを保存せずに閉じる
+    End If
+
+FinalizeInitWithoutFileOpen: ' 終了処理（ファイルを開かなかった場合も含む）
+    ' --- Excelの設定を元に戻す ---
+    Application.DisplayAlerts = originalDisplayAlerts ' 警告メッセージの設定を元に戻す
+    Application.EnableEvents = originalEnableEvents ' イベント設定を元に戻す
+    Application.ScreenUpdating = True ' 画面更新を再開
+
+    Exit Sub ' プロシージャを終了
+
+ErrorHandlerInit: ' エラー発生時の処理
+    MsgBox "初期化中に予期せぬエラーが発生しました。" & vbCrLf & Err.Description, vbCritical
+    Resume FinalizeInit ' 終了処理へジャンプして、Excelの設定などを元に戻す
+End Sub
+
+
+'================================================================================
+' フォームの入力チェックや自動処理
+'================================================================================
+' 「着手」テキストボックスからフォーカスが外れたときに実行
+Private Sub 着手_Exit(ByVal Cancel As MSForms.ReturnBoolean)
+    Call ValidateDate(Me.着手, "着手日", Cancel)
+End Sub
+
+' 「完成」テキストボックスからフォーカスが外れたときに実行
+Private Sub 完成_Exit(ByVal Cancel As MSForms.ReturnBoolean)
+    Call ValidateDate(Me.完成, "完成日", Cancel)
+End Sub
+
+' 「契約日」テキストボックスからフォーカスが外れたときに実行
+Private Sub 契約日_Exit(ByVal Cancel As MSForms.ReturnBoolean)
+    Call ValidateDate(Me.契約日, "契約日", Cancel)
+End Sub
+
+' 「金額」テキストボックスからフォーカスが外れたときに実行
+Private Sub 金額_Exit(ByVal Cancel As MSForms.ReturnBoolean)
+    ' 入力された金額が数値で、かつ1000万円以上の場合
+    If IsNumeric(Me.金額.Value) Then
+        If Val(Me.金額.Value) >= 10000000 Then
+            ' 「アンケート」のチェックボックスに自動でチェックを入れる
+            Me.アンケート.Value = True
+        End If
+    End If
+End Sub
+
+' 日付入力用の共通チェック処理
+Private Sub ValidateDate(ByVal DateField As MSForms.TextBox, ByVal FieldName As String, ByRef Cancel As MSForms.ReturnBoolean)
+    Dim inputText As String
+    inputText = Trim(DateField.Value) ' 入力値の前後のスペースを削除
+    If inputText = "" Then Exit Sub ' 空欄なら何もしない
+
+    ' 入力値が日付として正しい形式かチェック
+    If IsDate(inputText) Then
+        ' 正しい場合は「YYYY/MM/DD」形式に統一
+        DateField.Value = Format(CDate(inputText), "yyyy/mm/dd")
+    Else
+        ' 正しくない場合はエラーメッセージを表示し、入力をキャンセル
+        MsgBox FieldName & " は「YYYY/MM/DD」形式で入力してください。" & vbCrLf & "(例: " & Format(Date, "yyyy/mm/dd") & ")", vbExclamation, "入力エラー"
+        Cancel = True ' フォーカスが外れないようにする
+    End If
+End Sub
+
+
+'================================================================================
+' 「登録」ボタンがクリックされたときの処理
+'================================================================================
+Private Sub 登録_Click()
+    Dim wbTarget_Reg As Workbook
+    Dim wsTarget_Reg As Worksheet, wsMaster_Reg As Worksheet
+    Dim targetRow As Long
+    Dim newKoujiBangou As String
+    Dim isSuccess As Boolean
+    Dim targetFilePath As String
+    Dim originalDisplayAlerts As Boolean
+    Dim originalEnableEvents As Boolean
+
+    isSuccess = False ' 処理成功フラグを初期化
+
+    ' --- 処理中の画面のちらつきや不要なメッセージを抑制し、高速化 ---
+    originalDisplayAlerts = Application.DisplayAlerts
+    originalEnableEvents = Application.EnableEvents
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+    Application.EnableEvents = False
+
+    ' エラーが発生した場合は「ErrorHandlerReg」へジャンプ
+    On Error GoTo ErrorHandlerReg
+
+    ' --- キャッシュ（一時保存）された転記先シート名があるか確認 ---
+    If m_CachedTargetSheetName = "" Then
+        MsgBox "対象シート名がキャッシュされていません。フォームを一度閉じて再度開いてください。", vbCritical
+        GoTo TheEndReg ' 終了処理へ
+    End If
+
+    ' --- 外部のExcelファイルを開き、登録処理を実行 ---
+    ' テストモードかどうかで、参照するファイルパスを切り替える
+    If IS_TEST_MODE Then
+        targetFilePath = m_TEST_FILE_PATH
+    Else
+        targetFilePath = Trim(CStr(ThisWorkbook.Sheets("入力フォーム").Range(m_PATH_CELL).Value))
+    End If
+
+    ' 指定されたパスにファイルが存在するかチェック
+    If Dir(targetFilePath) = "" Then
+        MsgBox "対象のファイルパスが無効です。" & vbCrLf & targetFilePath, vbCritical, "設定エラー"
+        GoTo TheEndReg
+    End If
+
+    ' 入力必須項目のチェック。未入力があれば処理を中断
+    If Not ValidateInputs() Then GoTo TheEndReg
+
+    ' 転記先のファイルが既に開かれていないかチェック（二重編集を防ぐため）
+    Dim openedWbMain As Workbook
+    For Each openedWbMain In Application.Workbooks
+        If openedWbMain.FullName = targetFilePath Then
+            MsgBox "対象のExcelファイルが既に開かれています。閉じてから再度実行してください。", vbCritical
+            GoTo TheEndReg
+        End If
+    Next openedWbMain
+
+    ' 他のユーザーが編集中（書き込みロック）でないか確認しながらファイルを開く
+    On Error Resume Next ' エラーを一時的に無視
+    Set wbTarget_Reg = Application.Workbooks.Open(fileName:=targetFilePath, ReadOnly:=False, UpdateLinks:=0)
+    On Error GoTo ErrorHandlerReg ' エラーハンドリングを再開
+
+    ' ファイルを開けなかった場合（他の人が使用中など）
+    If wbTarget_Reg Is Nothing Then
+        MsgBox "対象のExcelファイルを開けませんでした。" & vbCrLf & _
+               "他のユーザーが書き込みロックしている可能性があります。", vbCritical
+        GoTo TheEndReg
+    End If
+
+    ' ファイルが読み取り専用で開かれた場合
+    If wbTarget_Reg.ReadOnly Then
+        MsgBox "対象のExcelファイルは読み取り専用で開かれました。" & vbCrLf & _
+               "このため、変更を保存できません。他のユーザーが使用中か確認してください。", vbExclamation
+        GoTo TheEndReg
+    End If
+
+    ' 開いたファイルに「管理マスタ」シートが存在するかチェック
+    If Not SheetExists(wbTarget_Reg, m_KANRI_MASTER_NAME) Then
+        MsgBox "登録先Excelに「" & m_KANRI_MASTER_NAME & "」が見つかりません。", vbCritical
+        GoTo TheEndReg
+    End If
+    Set wsMaster_Reg = wbTarget_Reg.Sheets(m_KANRI_MASTER_NAME)
+
+    ' キャッシュされた転記先シートが存在するかチェック
+    If Not SheetExists(wbTarget_Reg, m_CachedTargetSheetName) Then
+        MsgBox "登録先Excelに「" & m_CachedTargetSheetName & "」が見つかりません。", vbCritical
+        GoTo TheEndReg
+    End If
+    Set wsTarget_Reg = wbTarget_Reg.Sheets(m_CachedTargetSheetName)
+
+    ' データを書き込む最初の空き行を探す
+    targetRow = FindNextAvailableRow(wsTarget_Reg)
+    If targetRow = 0 Then
+        MsgBox "転記先の空白行が見つかりませんでした。", vbExclamation
+        GoTo TheEndReg
+    End If
+
+    ' 新しい工事番号を自動生成し、ユーザーに確認・修正させる
+    newKoujiBangou = GenerateAndConfirmKoujiBangou(wsTarget_Reg, wsMaster_Reg)
+    ' 工事番号が空（キャンセルされた）場合は処理を中断
+    If newKoujiBangou = "" Then GoTo TheEndReg
+
+    ' フォームの入力内容をシートに転記する
+    Call TransferDataToSheet(wsTarget_Reg, targetRow, newKoujiBangou)
+
+    ' 転記先のファイルを上書き保存
+    wbTarget_Reg.Save
+
+    ' このツールの「工事一覧」シートも最新の情報に更新する
+    If Not UpdateLocalListSheet(wsTarget_Reg, wsMaster_Reg) Then GoTo TheEndReg
+
+    isSuccess = True ' 全ての処理が成功したことを記録
+
+TheEndReg: ' 登録処理の終了処理
+    ' 開いたオブジェクトを解放（メモリをクリーンにする）
+    If Not wsMaster_Reg Is Nothing Then Set wsMaster_Reg = Nothing
+    If Not wsTarget_Reg Is Nothing Then Set wsTarget_Reg = Nothing
+    If Not wbTarget_Reg Is Nothing Then
+        wbTarget_Reg.Close SaveChanges:=False ' 変更を保存せずに閉じる（既にSave済みのため）
+    End If
+
+    Application.CutCopyMode = False ' コピー・切り取りモードを解除
+
+    ' --- Excelの設定を元に戻す ---
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = originalDisplayAlerts
+    Application.EnableEvents = originalEnableEvents
+
+    ' 登録が成功した場合のみ完了メッセージを表示し、フォームを閉じる
+    If isSuccess Then
+        MsgBox "登録が完了しました。", vbInformation
+        Unload Me
+    End If
+
+    Exit Sub ' プロシージャを終了
+
+ErrorHandlerReg: ' エラー発生時の処理
+    MsgBox "予期せぬエラーが発生しました。" & vbCrLf & vbCrLf & _
+           "エラー番号: " & Err.Number & vbCrLf & _
+           "エラー内容: " & Err.Description, vbCritical, "VBA実行エラー"
+    Resume TheEndReg ' 終了処理へジャンプ
+End Sub
+
+
+'--------------------------------------------------------------------------------
+' 上記のメイン処理から呼び出される、補助的な関数やサブルーチン群
+'--------------------------------------------------------------------------------
+
+' 指定されたブックに特定の名前のシートが存在するかどうかを調べる関数
+Private Function SheetExists(ByVal wb As Workbook, ByVal sheetName As String) As Boolean
+    Dim ws As Worksheet
+    On Error Resume Next ' エラーが発生しても無視
+    Set ws = wb.Sheets(sheetName) ' シートを取得しようと試みる
+    On Error GoTo 0 ' エラーハンドリングを元に戻す
+    SheetExists = Not ws Is Nothing ' シートが取得できればTrue、できなければFalse
+End Function
+
+' フォームの必須項目が入力されているかチェックする関数
+Private Function ValidateInputs() As Boolean
+    Dim errorMessage As String
+    errorMessage = ""
+    ' 未入力の項目があれば、エラーメッセージに追加していく
+    If Me.担当者.ListIndex = -1 Then errorMessage = errorMessage & "・担当者名を選択してください。" & vbCrLf
+    If Trim(Me.工事名称.Value) = "" Then errorMessage = errorMessage & "・工事名称を入力してください。" & vbCrLf
+    If Trim(Me.発注者入力.Value) = "" Then errorMessage = errorMessage & "・発注者を入力してください。" & vbCrLf
+
+    ' エラーメッセージがあれば表示し、Falseを返す
+    If errorMessage <> "" Then
+        MsgBox "以下の項目を確認してください。" & vbCrLf & vbCrLf & errorMessage, vbExclamation, "入力エラー"
+        ValidateInputs = False
+    Else
+        ValidateInputs = True ' 全て入力済みならTrueを返す
+    End If
+End Function
+
+' 指定されたシートで、工事名称列が空になっている最初の行番号を見つける関数
+Private Function FindNextAvailableRow(ByVal ws As Worksheet) As Long
+    Dim r As Long
+    ' 4行目から最終行の1つ下までループ
+    For r = 4 To ws.Cells(ws.Rows.count, COL_KOUJI_NAME).End(xlUp).Row + 1
+        ' 工事名称列が空欄の行を見つけたら、その行番号を返す
+        If Trim(CStr(ws.Cells(r, COL_KOUJI_NAME).Value)) = "" Then
+            FindNextAvailableRow = r
+            Exit Function
+        End If
+    Next r
+    ' 空き行が見つからなかった場合は0を返す
+    FindNextAvailableRow = 0
+End Function
+
+' 新しい工事番号を生成し、ユーザーに確認・修正を求める関数
+Private Function GenerateAndConfirmKoujiBangou(ByVal wsTarget As Worksheet, ByVal wsMaster As Worksheet) As String
+    Dim autoKoujiBangou As String
+    Dim userModifiedKoujiBangou As String
+
+    ' 工事番号を自動生成
+    autoKoujiBangou = CreateNewKoujiBangou(wsTarget, wsMaster)
+    ' 担当者が見つからずエラーになった場合
+    If autoKoujiBangou = "ERROR" Then
+        MsgBox "担当者がマスタに見つかりません。", vbCritical
+        GenerateAndConfirmKoujiBangou = "" ' 空文字を返して処理中断
+        Exit Function
+    End If
+
+    ' 自動生成した工事番号を提示し、ユーザーに確認・修正させる
+    userModifiedKoujiBangou = InputBox("工事番号を下記で自動生成します。必要に応じて修正してください。", "工事番号の確認", autoKoujiBangou)
+
+    ' ユーザーの操作に応じて返す値を決定
+    If StrPtr(userModifiedKoujiBangou) = 0 Then ' キャンセルボタンが押された場合
+        GenerateAndConfirmKoujiBangou = ""
+    ElseIf userModifiedKoujiBangou = "" Then ' OKボタンが押されたが、入力欄が空の場合
+        MsgBox "工事番号が空欄です。登録を中止します。", vbExclamation
+        GenerateAndConfirmKoujiBangou = ""
+    Else ' OKボタンが押され、何かが入力されている場合
+        GenerateAndConfirmKoujiBangou = userModifiedKoujiBangou
+    End If
+End Function
+
+' 新しい工事番号を自動で作成する関数
+Private Function CreateNewKoujiBangou(ByVal wsTarget As Worksheet, ByVal wsMaster As Worksheet) As String
+    Dim decisionDate As Date
+    Dim inputYearShort As Integer
+    Dim selectedStaff As String
+    Dim staffNumberValue As Variant
+    Dim matchRow As Variant
+    Dim prefix As String
+    Dim maxZZZ As Long
+    Dim r As Long
+    Dim koujiBangou As String
+
+    ' 契約日が入力されていればその日付、なければ今日の日付を基準とする
+    If IsDate(Me.契約日.Value) Then decisionDate = CDate(Me.契約日.Value) Else decisionDate = Date
+    ' 基準日が6月以降ならその年、5月以前なら前年を年度とする
+    If Month(decisionDate) >= 6 Then inputYearShort = Year(decisionDate) Else inputYearShort = Year(decisionDate) - 1
+
+    ' 選択された担当者の番号をマスタから探す
+    selectedStaff = Me.担当者.Value
+    matchRow = Application.Match(selectedStaff, wsMaster.Columns(MASTER_COL_STAFF_NAME), 0)
+    ' 担当者が見つからなかった場合
+    If IsError(matchRow) Then
+        CreateNewKoujiBangou = "ERROR"
+        Exit Function
+    End If
+    staffNumberValue = wsMaster.Cells(matchRow, MASTER_COL_STAFF_NO).Value
+
+    ' 工事番号のプレフィックス（接頭辞）を作成 (例: "03-2401-")
+    prefix = "03-" & Right(CStr(inputYearShort), 2) & Format(staffNumberValue, "00") & "-"
+
+    ' 同じプレフィックスを持つ既存の工事番号から、末尾3桁の最大値を探す
+    maxZZZ = 0
+    For r = 1 To wsTarget.Cells(wsTarget.Rows.count, COL_KOUJI_BANGO).End(xlUp).Row
+        koujiBangou = CStr(wsTarget.Cells(r, COL_KOUJI_BANGO).Value)
+        ' プレフィックスが一致するかどうか
+        If Left(koujiBangou, Len(prefix)) = prefix Then
+            Dim existingZZZ As String
+            existingZZZ = Right(koujiBangou, 3) ' 末尾3桁を取得
+            ' 3桁が数字なら、現在の最大値と比較して更新
+            If IsNumeric(existingZZZ) Then
+                If CLng(existingZZZ) > maxZZZ Then maxZZZ = CLng(existingZZZ)
+            End If
+        End If
+    Next r
+
+    ' 「プレフィックス」＋「最大値+1」で新しい工事番号を作成 (例: "03-2401-005")
+    CreateNewKoujiBangou = prefix & Format(maxZZZ + 1, "000")
+End Function
+
+' フォームの入力データをシートに転記するサブルーチン
+Private Sub TransferDataToSheet(ByVal wsTarget As Worksheet, ByVal targetRow As Long, ByVal newKoujiBangou As String)
+    Dim inputYearFull As Integer
+    Dim parts() As String
+
+    ' シートの保護を一時的に解除（現在はパスワードなし）
+    wsTarget.Unprotect ' Password:=SHEET_PASSWORD を削除
+
+    ' 工事番号から西暦（4桁）を取得
+    parts = Split(newKoujiBangou, "-")
+    If UBound(parts) >= 1 And Len(parts(1)) >= 2 And IsNumeric(Left(parts(1), 2)) Then
+        inputYearFull = CInt("20" & Left(parts(1), 2))
+    Else
+        inputYearFull = Year(Date) ' 取得できない場合は当年
+    End If
+
+    ' 転記先シート（Withブロックで省略）の各セルに値を設定
+    With wsTarget
+        .Cells(targetRow, COL_YEAR).Value = inputYearFull
+        .Cells(targetRow, COL_NO).Value = Application.WorksheetFunction.Max(.Columns(COL_NO)) + 1 ' No.列の最大値+1
+        .Cells(targetRow, COL_STAFF).Value = Me.担当者.Value
+        .Cells(targetRow, COL_KOUJI_BANGO).Value = newKoujiBangou
+        .Cells(targetRow, COL_KOUJI_NAME).Value = Me.工事名称.Value
+        .Cells(targetRow, "F").Value = Me.発注者入力.Value
+        If IsDate(Me.着手.Value) Then .Cells(targetRow, "G").Value = CDate(Me.着手.Value)
+        If IsDate(Me.完成.Value) Then .Cells(targetRow, "H").Value = CDate(Me.完成.Value)
+
+        ' 有り/無し のラジオボタンに応じて「◯」か「ー」を入力
+        If Me.有り.Value = True Then
+            .Cells(targetRow, "I").Value = "◯"
+        ElseIf Me.無し.Value = True Then
+            .Cells(targetRow, "I").Value = "ー"
+        End If
+
+        If IsDate(Me.契約日.Value) Then .Cells(targetRow, "J").Value = CDate(Me.契約日.Value)
+        .Cells(targetRow, "K").Value = Me.金額.Value
+        
+        ' アンケート列の入力ロジック
+        ' 金額が1000万円以上なら強制的に「◯」
+        If Val(Me.金額.Value) >= 10000000 Then
+            .Cells(targetRow, "L").Value = "◯"
+        ' 1000万円未満で、アンケートチェックボックスがONなら「◯」
+        ElseIf Me.アンケート.Value = True Then
+            .Cells(targetRow, "L").Value = "◯"
+        ' それ以外は「ー」
+        Else
+            .Cells(targetRow, "L").Value = "ー"
+        End If
+        
+        .Cells(targetRow, "M").Value = Me.コメント.Value
+    End With
+
+    ' シートの再保護は行わない
+    ' wsTarget.Protect Password:=SHEET_PASSWORD ' この行を削除
+End Sub
+' このツールの「工事一覧」シートを最新の情報に更新する関数
+Private Function UpdateLocalListSheet(ByVal wsSource As Worksheet, ByVal wsMaster As Worksheet) As Boolean
+    Dim wsDest As Worksheet
+    Dim destSheetName As String
+    Dim lastRowSource As Long
+    Dim copyRange As Range
+    ' Dim dataArray As Variant ' ← 不要になるため削除
+    ' Dim c As Long, currentColumnWidth As Double ' ← 不要になるため削除
+
+    UpdateLocalListSheet = False ' 処理成功フラグを初期化
+
+    ' 「管理マスタ」シートのG5セルから、コピー先のシート名を取得
+    destSheetName = Trim(CStr(wsMaster.Range("G5").Value))
+    If destSheetName = "" Then
+        MsgBox "「" & m_KANRI_MASTER_NAME + "」シートのG5セルにコピー先のシート名が指定されていません。", vbExclamation
+        Exit Function
+    End If
+
+    ' このファイル内にコピー先シートが存在するかチェック
+    On Error Resume Next
+    Set wsDest = ThisWorkbook.Sheets(destSheetName)
+    On Error GoTo 0
+    If wsDest Is Nothing Then
+        MsgBox "このファイルに「" & destSheetName & "」が見つかりませんでした。", vbExclamation
+        Exit Function
+    End If
+
+    ' コピー先シートの保護を一時的に解除
+    wsDest.Unprotect
+    wsDest.Range("A3:M" & wsDest.Rows.count).Clear
+
+    ' コピー元の最終行を取得
+    lastRowSource = wsSource.Cells(wsSource.Rows.count, "A").End(xlUp).Row
+
+    ' コピー元にデータが存在すれば、コピー範囲を設定
+    If lastRowSource < 5 Then
+        Set copyRange = Nothing ' データがなければ何もしない
+    Else
+        Set copyRange = wsSource.Range("A5:M" & lastRowSource)
+    End If
+
+    ' コピー範囲が存在する場合のみ実行
+    If Not copyRange Is Nothing Then
+        ' この一行で、値、背景色、文字色、罫線、列幅などすべてがコピーされます。
+        copyRange.Copy Destination:=wsDest.Range("A3")
+    End If
+
+    Application.CutCopyMode = False ' コピー・切り取りモードを解除
+    UpdateLocalListSheet = True ' 処理成功
+End Function
