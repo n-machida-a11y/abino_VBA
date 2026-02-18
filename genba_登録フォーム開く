@@ -1,0 +1,3 @@
+Sub ユーザーフォーム呼び出し()
+    登録ボタン.Show vbModeless
+End Sub
