@@ -2,9 +2,7 @@ Option Explicit
 
 '--- 初期設定 ---
 ' Trueにすると、下のテスト用ファイルパスが使われる（開発者向け）
-' ★本番運用の際はここを False にしてください
-Private Const IS_TEST_MODE As Boolean = False
-
+Private Const IS_TEST_MODE As Boolean = True
 ' テスト時に使用する「工事番号管理表.xlsm」の場所
 Private Const m_TEST_FILE_PATH_FOR_TEST As String = "Z:\Users\n-machida\Desktop\工事番号管理表.xlsm"
 
@@ -13,7 +11,7 @@ Private Const SHEET_PASSWORD As String = ""
 
 '--- 他のフォームから値を受け取るための変数 ---
 Public m_SearchedKoujiName As String ' 検索対象の「工事名称」
-Public m_PassedTantousha As String   ' 検索対象の「担当者名」
+Public m_PassedTantousha As String  ' 検索対象の「担当者名」
 
 '--- このフォーム内だけで使う変数 ---
 ' ドロップダウンリスト同士が無限に更新しあうのを防ぐためのスイッチ（フラグ）
@@ -26,7 +24,7 @@ Private m_KoujiBangou As String
 '--- 高速化のため、各種リストを一時保存するキャッシュ変数 ---
 Private m_CachedSeikyuusakiList As Variant      ' 「請求書提出先」リスト
 Private m_CachedTeishutsuyoukouList As Variant ' 「提出要項」リスト
-Private m_CachedDoufuubutsuList As Variant      ' 「同封物」リスト
+Private m_CachedDoufuubutsuList As Variant     ' 「同封物」リスト
 
 '--- このフォームで処理する外部ファイルのパスを保存する変数 ---
 Private m_TARGET_FILE_PATH As String
@@ -37,13 +35,12 @@ Private Const m_DATA_SHEET_NAME As String = "工事番号一覧"
 Private Const m_KANRI_MASTER_NAME As String = "管理マスタ"
 Private Const m_OTHER_MASTER_NAME As String = "その他マスタ"
 Private Const m_IRAI_RIREKI_SHEET_NAME As String = "依頼履歴"
-
 ' 「その他マスタ」シート内の列定義
 Private Const MASTER_OTHER_SEIKYUUSAKI_COL As String = "A"      ' 請求書提出先
-Private Const MASTER_OTHER_YUBIN_NO_COL As String = "B"          ' 郵便番号
-Private Const MASTER_OTHER_JUSHO_COL As String = "C"             ' 住所
+Private Const MASTER_OTHER_YUBIN_NO_COL As String = "B"         ' 郵便番号
+Private Const MASTER_OTHER_JUSHO_COL As String = "C"            ' 住所
 Private Const MASTER_OTHER_TEISHUTSUYOUKOU_COL As String = "G" ' 提出要項
-Private Const MASTER_OTHER_DOUFUUBUTSU_COL As String = "I"       ' 同封物
+Private Const MASTER_OTHER_DOUFUUBUTSU_COL As String = "I"      ' 同封物
 
 ' 同封物リストボックスの区切り文字（保存用）
 Private Const DOUFUUBUTSU_DELIMITER_SAVE As String = ","
@@ -73,6 +70,46 @@ Public Sub SetupAndShow(ByVal KoujiName As String, ByVal Tantousha As String)
 
     ' --- ③ 初期値設定後に、フォームを表示する ---
     Me.Show
+End Sub
+
+Private Sub Label13_Click()
+
+End Sub
+
+Private Sub Label18_Click()
+
+End Sub
+
+Private Sub Label35_Click()
+
+End Sub
+
+Private Sub Label36_Click()
+
+End Sub
+
+Private Sub Label41_Click()
+
+End Sub
+
+Private Sub Label46_Click()
+
+End Sub
+
+Private Sub Label47_Click()
+
+End Sub
+
+Private Sub Label57_Click()
+
+End Sub
+
+Private Sub Label58_Click()
+
+End Sub
+
+Private Sub Label62_Click()
+
 End Sub
 
 '================================================================================
@@ -307,9 +344,15 @@ Private Sub 依頼書作成_Click()
     ' (2-2) 「工事番号一覧」の更新処理を停止（ユーザーの要望により）
     ' Call UpdateExternalFile(wsSrc, m_TargetRow)
     
-    ' (2-3) 「依頼履歴」シートに、今回の依頼内容を新しい行として追記する
+    ' (2-2) 「依頼履歴」シートに、今回の依頼内容を新しい行として追記する
     Call AddDataToIraiRireki(wsRireki)
     
+    ' (2-4) 「工事番号一覧」の色付け処理を停止（ユーザーの要望により）
+    ' With wsSrc.Rows(m_TargetRow).Interior
+    '     .Pattern = xlSolid
+    '     .Color = RGB(220, 220, 220)  ' 色を薄めのグレーに設定
+    ' End With
+
     ' 更新内容を保存
     Application.EnableEvents = False ' イベントを一時的に停止
     wbTarget_Click.Save              ' 保存を実行
@@ -388,6 +431,14 @@ CleanUpClick: ' 終了処理
 
 ErrorHandlerClick: ' エラー発生時の処理
     Resume CleanUpClick
+End Sub
+
+Private Sub 契約無し_Click()
+
+End Sub
+
+Private Sub 請求書記載文言_Change()
+
 End Sub
 
 '================================================================================
@@ -485,8 +536,7 @@ Private Sub AddDataToIraiRireki(ByVal wsRireki As Worksheet)
     wsRireki.Unprotect
     
     Dim nextRow As Long, lastRow As Long
-    Dim newIraiNo As String
-    Dim nextNoNum As Long
+    Dim lastNoStr As String, nextNoNum As Long, newIraiNo As String
     
     ' --- 1. 追記する行番号を決定 (1行目はヘッダー) ---
     lastRow = wsRireki.Cells(wsRireki.Rows.count, "A").End(xlUp).Row
@@ -498,49 +548,20 @@ Private Sub AddDataToIraiRireki(ByVal wsRireki As Worksheet)
         nextRow = lastRow + 1
     End If
     
-    ' --- 2. 依頼NOを自動採番 (最大値を探して+1するロジックに変更) ---
-    ' 「301-1」のような枝番があっても、「301」などの親番号の最大値を探して、
-    ' 「305」のように次の番号を振る
-    
-    Dim r As Long
-    Dim currentVal As String
-    Dim baseStr As String
-    Dim currentNum As Long
-    Dim maxNum As Long
-    
-    maxNum = 0 ' 最大値の初期化
-    
-    ' 2行目から最終行までループして、一番大きい番号を探す
-    For r = 2 To lastRow
-        currentVal = Trim(CStr(wsRireki.Cells(r, "A").Value))
-        
-        If currentVal <> "" Then
-            ' ハイフンが含まれている場合は、ハイフンの前だけを取り出す (例: "0301-1" → "0301")
-            If InStr(currentVal, "-") > 0 Or InStr(currentVal, "‐") > 0 Then ' 半角・全角ハイフン対応
-                baseStr = Split(Replace(currentVal, "‐", "-"), "-")(0)
-            Else
-                baseStr = currentVal
-            End If
-            
-            ' "03"で始まり、後ろが数値であるかチェック (例: "0301" → 301)
-            ' ※「03」というプレフィックス(2桁)がついている前提で、3文字目以降を数値化します
-            If IsNumeric(baseStr) And Len(baseStr) > 2 Then
-                currentNum = Val(Mid(baseStr, 3))
-                
-                ' これまでに見つけた最大値より大きければ更新
-                If currentNum > maxNum Then
-                    maxNum = currentNum
-                End If
-            End If
+    ' --- 2. 依頼NOを自動採番 ("0301", "0302"...) ---
+    If lastRow < 2 Then ' データがまだない場合
+        nextNoNum = 1
+    Else
+        lastNoStr = wsRireki.Cells(lastRow, "A").Value
+        If IsNumeric(lastNoStr) And Len(lastNoStr) > 2 Then
+            ' "03"プレフィックスを想定して数値部分を取得
+            nextNoNum = Val(Mid(lastNoStr, 3)) + 1
+        Else
+            ' 予期せぬ値が入っていたら、とりあえず1からカウント
+            nextNoNum = 1
         End If
-    Next r
-    
-    ' 見つかった最大値に+1する (データが何もない場合は1になる)
-    nextNoNum = maxNum + 1
-    
-    ' "03" + 2桁フォーマットで結合 (例: 0305)
-    newIraiNo = "03" & Format(nextNoNum, "00")
-
+    End If
+    newIraiNo = "03" & Format(nextNoNum, "00") ' "0301", "0399", "03100" のように連番を作成
 
     ' --- 3. データを書き込む ---
     With wsRireki
@@ -932,4 +953,16 @@ Private Function SheetExists(ByVal wb As Workbook, ByVal sheetName As String) As
     On Error GoTo 0
     SheetExists = Not ws Is Nothing
 End Function
+
+Private Sub 提出要項_Change()
+
+End Sub
+
+Private Sub 提出要項その他_Change()
+
+End Sub
+
+
+
+
 
