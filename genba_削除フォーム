@@ -1,0 +1,482 @@
+' ユーザーフォーム: 削除
+' オブジェクト名: 削除 (VBEのプロパティウィンドウで確認)
+
+Option Explicit
+
+'--- 初期設定 ---
+' Trueにすると、下のテスト用ファイルパスが使われる（開発者向け）
+Private Const IS_TEST_MODE As Boolean = True
+' テスト時に使用する「工事番号管理表.xlsm」の場所
+Private Const m_TEST_FILE_PATH_FOR_TEST As String = "Z:\Users\n-machida\Desktop\工事番号管理表.xlsm"
+
+' シート保護用のパスワード（現在は未使用のため空欄）
+Private Const SHEET_PASSWORD As String = ""
+
+'--- プログラム内で固定的に使う文字（定数） ---
+' 処理対象となる「工事番号管理表.xlsm」のフルパスを保存する変数
+Private m_TARGET_FILE_PATH As String
+
+' 外部ファイル内のシート名やセル番地を固定値として定義
+Private Const m_DATA_SHEET_NAME As String = "工事番号一覧" ' データが格納されているシート名
+Private Const m_KANRI_MASTER_NAME As String = "管理マスタ" ' 担当者リストがあるシート
+Private Const m_PATH_CELL As String = "A36" ' パスが記載されているセル
+
+'--- データを一時保存しておくための変数（キャッシュ） ---
+' 担当者リストを一時保存
+Private m_CachedStaffList As Variant
+' 高速化のため、全工事データを「担当者→工事番号→工事名称」の階層で一時保存する変数
+Private m_CachedKoujiData As Object
+' ドロップダウンリスト同士が無限に更新しあうのを防ぐためのスイッチ（フラグ）
+Private m_isComboBoxUpdating As Boolean
+
+'================================================================================
+' フォームが開かれたときに最初に実行される処理
+'================================================================================
+Private Sub UserForm_Initialize()
+    Dim wbTarget As Workbook, wsMaster As Worksheet
+    Dim originalDisplayAlerts As Boolean
+    Dim originalEnableEvents As Boolean
+
+    ' --- 初期状態では削除ボタンを押せないようにする ---
+    Me.削除.Enabled = False
+
+    ' --- 処理中の画面のちらつきや不要なメッセージを抑制し、高速化 ---
+    Application.ScreenUpdating = False
+    originalDisplayAlerts = Application.DisplayAlerts
+    Application.DisplayAlerts = False
+    originalEnableEvents = Application.EnableEvents
+    Application.EnableEvents = False
+
+    ' エラーが発生した場合は「ErrorHandlerInit」へジャンプ
+    On Error GoTo ErrorHandlerInit
+
+    ' --- 処理対象ファイルのパスを取得 ---
+    If IS_TEST_MODE Then
+        m_TARGET_FILE_PATH = m_TEST_FILE_PATH_FOR_TEST
+    Else
+        m_TARGET_FILE_PATH = Trim(CStr(ThisWorkbook.Sheets("入力フォーム").Range(m_PATH_CELL).Value))
+    End If
+
+    ' ファイルが存在するかチェック
+    If Dir(m_TARGET_FILE_PATH) = "" Then
+        MsgBox "指定されたファイルが見つかりません。", vbCritical
+        Unload Me
+        GoTo FinalizeInit
+    End If
+
+    ' --- 外部ファイルを開き、必要なデータを読み込む ---
+    Set wbTarget = Application.Workbooks.Open(fileName:=m_TARGET_FILE_PATH, ReadOnly:=True, UpdateLinks:=0)
+
+    ' 「管理マスタ」シートから担当者リストを読み込み、ドロップダウンに設定
+    If Not SheetExists(wbTarget, m_KANRI_MASTER_NAME) Then
+        MsgBox "担当者マスタシート「" & m_KANRI_MASTER_NAME & "」が見つかりません。", vbCritical, "シートエラー"
+        GoTo FinalizeInit
+    End If
+    Set wsMaster = wbTarget.Sheets(m_KANRI_MASTER_NAME)
+
+    ' 担当者リストをドロップダウンに設定し、キャッシュにも保存
+    Me.担当者.List = wsMaster.Range("A2:A" & wsMaster.Cells(wsMaster.Rows.count, "A").End(xlUp).Row).Value
+    m_CachedStaffList = Me.担当者.List
+
+    ' --- 全工事データを読み込み、高速検索できるようにキャッシュ変数に格納 ---
+    Set m_CachedKoujiData = CreateObject("Scripting.Dictionary")
+
+    Dim wsTarget As Worksheet
+    Dim r As Long
+    Dim currentStaff As String
+    Dim currentKoujiName As String
+    Dim currentKoujiBango As String
+
+    If Not SheetExists(wbTarget, m_DATA_SHEET_NAME) Then
+        MsgBox "データシート「" & m_DATA_SHEET_NAME & "」が見つかりません。", vbCritical, "シートエラー"
+        GoTo FinalizeInit
+    End If
+    Set wsTarget = wbTarget.Sheets(m_DATA_SHEET_NAME)
+
+    ' データシートのC列(担当者), D列(工事番号), E列(工事名称)を読み込む
+    For r = wsTarget.Cells(wsTarget.Rows.count, "C").End(xlUp).Row To 2 Step -1 ' 最終行から上へループ
+        currentStaff = Trim(CStr(wsTarget.Cells(r, "C").Value))
+        currentKoujiBango = Trim(CStr(wsTarget.Cells(r, "D").Value))
+        currentKoujiName = Trim(CStr(wsTarget.Cells(r, "E").Value))
+
+        If currentStaff <> "" And currentKoujiName <> "" And currentKoujiBango <> "" Then
+            ' まだキャッシュにない担当者の場合、その担当者用の入れ物を準備
+            If Not m_CachedKoujiData.Exists(currentStaff) Then
+                m_CachedKoujiData.Add currentStaff, CreateObject("Scripting.Dictionary")
+            End If
+
+            ' 担当者ごとの入れ物に「工事番号」をキーとして「工事名称」を保存
+            If Not m_CachedKoujiData(currentStaff).Exists(currentKoujiBango) Then
+                m_CachedKoujiData(currentStaff).Add currentKoujiBango, currentKoujiName
+            Else
+                ' (念のため)同じ工事番号が重複していたら、新しい情報で上書き
+                m_CachedKoujiData(currentStaff).item(currentKoujiBango) = currentKoujiName
+            End If
+        End If
+    Next r
+
+FinalizeInit: ' 終了処理
+    ' オブジェクトを解放し、Excelの設定を元に戻す
+    If Not wsMaster Is Nothing Then Set wsMaster = Nothing
+    If Not wsTarget Is Nothing Then Set wsTarget = Nothing
+    If Not wbTarget Is Nothing Then wbTarget.Close SaveChanges:=False
+
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = originalDisplayAlerts
+    Application.EnableEvents = originalEnableEvents
+    Exit Sub
+
+ErrorHandlerInit: ' エラー発生時の処理
+    MsgBox "初期化中にエラーが発生しました: " & Err.Description, vbCritical
+    Resume FinalizeInit
+End Sub
+
+'================================================================================
+' 「担当者」ドロップダウンが変更されたときの処理
+'================================================================================
+Private Sub 担当者_Change()
+    ' 他のドロップダウンからの自動更新中は、この処理を中断
+    If m_isComboBoxUpdating Then Exit Sub
+
+    ' これから他のドロップダウンを自動更新することを示すスイッチをON
+    m_isComboBoxUpdating = True
+    ' 担当者が変わったので、工事名称と工事番号のリストを一旦リセット
+    Me.工事名称.Clear
+    Me.工事番号.Clear
+    Me.削除.Enabled = False
+
+    ' 担当者の選択が解除された場合は、ここで処理を終了
+    If Me.担当者.ListIndex = -1 Then
+        m_isComboBoxUpdating = False ' スイッチをOFFに戻す
+        Exit Sub
+    End If
+
+    Dim selectedStaff As String
+    selectedStaff = Trim(Me.担当者.Value)
+
+    ' --- キャッシュの中から、選ばれた担当者の工事データを探してリストアップ ---
+    If Not m_CachedKoujiData Is Nothing Then
+        If m_CachedKoujiData.Exists(selectedStaff) Then
+            Dim koujiDict As Object ' 担当者ごとの「工事番号→工事名称」データ
+            Set koujiDict = m_CachedKoujiData(selectedStaff)
+
+            Dim koujiNamesArray() As String  ' 工事名称リスト用
+            Dim koujiBangosArray() As String ' 工事番号リスト用
+            Dim count As Long
+            count = 0
+
+            ' キャッシュ内のデータを配列に入れ直す
+            Dim koujiBangoKey As Variant
+            For Each koujiBangoKey In koujiDict.Keys
+                count = count + 1
+                ReDim Preserve koujiNamesArray(1 To count)
+                ReDim Preserve koujiBangosArray(1 To count)
+
+                koujiBangosArray(count) = koujiBangoKey                 ' 工事番号
+                koujiNamesArray(count) = koujiDict.item(koujiBangoKey) ' 工事名称
+            Next koujiBangoKey
+
+            ' 見つかった工事データをそれぞれのドロップダウンに設定
+            Me.工事名称.List = koujiNamesArray
+            Me.工事番号.List = koujiBangosArray
+        End If
+    End If
+
+    ' 自動更新が終わったのでスイッチをOFFに戻す
+    m_isComboBoxUpdating = False
+End Sub
+
+'================================================================================
+' 「工事名称」ドロップダウンが変更されたときの処理
+'================================================================================
+Private Sub 工事名称_Change()
+    ' 他のドロップダウンからの自動更新中は、この処理を中断
+    If m_isComboBoxUpdating Then Exit Sub
+
+    ' これから他のドロップダウンを自動更新することを示すスイッチをON
+    m_isComboBoxUpdating = True
+    ' 削除ボタンは一旦無効化し、工事番号をリセット
+    Me.削除.Enabled = False
+    Me.工事番号.Clear
+
+    Dim selectedKoujiName As String
+    selectedKoujiName = Trim(Me.工事名称.Value)
+
+    ' --- 選択された工事名称に一致する工事番号を、キャッシュから探して自動設定 ---
+    Dim selectedStaff As String
+    selectedStaff = Trim(Me.担当者.Value)
+
+    If selectedStaff <> "" And Not m_CachedKoujiData Is Nothing Then
+        If m_CachedKoujiData.Exists(selectedStaff) Then
+            Dim koujiDict As Object
+            Set koujiDict = m_CachedKoujiData(selectedStaff)
+
+            Dim koujiBangoKey As Variant
+            For Each koujiBangoKey In koujiDict.Keys
+                ' 工事名称が一致するものを探す
+                If Trim(koujiDict.item(koujiBangoKey)) = selectedKoujiName Then
+                    ' 見つかったら、対応する工事番号を設定し、削除ボタンを有効化
+                    Me.工事番号.Value = koujiBangoKey
+                    Me.削除.Enabled = True
+                    Exit For ' 該当データが見つかったのでループを抜ける
+                End If
+            Next koujiBangoKey
+        End If
+    End If
+
+    ' 自動更新が終わったのでスイッチをOFFに戻す
+    m_isComboBoxUpdating = False
+End Sub
+
+'================================================================================
+' 「工事番号」ドロップダウンが変更されたときの処理
+'================================================================================
+Private Sub 工事番号_Change()
+    ' 他のドロップダウンからの自動更新中は、この処理を中断
+    If m_isComboBoxUpdating Then Exit Sub
+
+    ' これから他のドロップダウンを自動更新することを示すスイッチをON
+    m_isComboBoxUpdating = True
+    ' 削除ボタンは一旦無効化し、工事名称をリセット
+    Me.削除.Enabled = False
+    Me.工事名称.Clear
+
+    Dim selectedKoujiBango As String
+    selectedKoujiBango = Trim(Me.工事番号.Value)
+
+    ' --- 選択された工事番号に一致する工事名称を、キャッシュから探して自動設定 ---
+    Dim selectedStaff As String
+    selectedStaff = Trim(Me.担当者.Value)
+
+    If selectedStaff <> "" And Not m_CachedKoujiData Is Nothing Then
+        If m_CachedKoujiData.Exists(selectedStaff) Then
+            Dim koujiDict As Object
+            Set koujiDict = m_CachedKoujiData(selectedStaff)
+
+            ' 工事番号がキャッシュに存在するかチェック
+            If koujiDict.Exists(selectedKoujiBango) Then
+                ' 見つかったら、対応する工事名称を設定し、削除ボタンを有効化
+                Me.工事名称.Value = koujiDict.item(selectedKoujiBango)
+                Me.削除.Enabled = True
+            End If
+        End If
+    End If
+
+    ' 自動更新が終わったのでスイッチをOFFに戻す
+    m_isComboBoxUpdating = False
+End Sub
+
+
+'================================================================================
+' 「削除」ボタンがクリックされたときの処理
+'================================================================================
+Private Sub 削除_Click()
+    Dim wbTarget As Workbook, wsTarget As Worksheet, wsMaster As Worksheet
+    Dim rowToDelete As Long
+    Dim r As Long
+    Dim koujiNameToDelete As String, tantoushaToDelete As String, koujiBangoToDelete As String
+    Dim originalDisplayAlerts As Boolean
+    Dim originalEnableEvents As Boolean
+
+    ' --- ① 削除対象が選択されているか確認 ---
+    If Me.担当者.ListIndex = -1 Then
+        MsgBox "担当者が選択されていません。", vbExclamation
+        Exit Sub
+    End If
+    If Trim(Me.工事名称.Value) = "" Or Trim(Me.工事番号.Value) = "" Then
+        MsgBox "削除する工事名称または工事番号が選択されていません。", vbExclamation
+        Exit Sub
+    End If
+
+    ' 削除対象の情報をフォームから取得
+    tantoushaToDelete = Me.担当者.Value
+    koujiNameToDelete = Me.工事名称.Value
+    koujiBangoToDelete = Me.工事番号.Value
+
+    ' --- ② ユーザーに最終確認 ---
+    If MsgBox("担当者: " & tantoushaToDelete & vbCrLf & _
+              "工事名称: " & koujiNameToDelete & vbCrLf & _
+              "工事番号: " & koujiBangoToDelete & vbCrLf & vbCrLf & _
+              "この工事情報を完全に削除します。よろしいですか？", _
+              vbQuestion + vbYesNo + vbDefaultButton2, "削除の最終確認") = vbNo Then
+        Exit Sub ' 「いいえ」が押されたら処理を中断
+    End If
+
+    ' --- 処理中の画面のちらつきや不要なメッセージを抑制し、高速化 ---
+    Application.ScreenUpdating = False
+    originalDisplayAlerts = Application.DisplayAlerts
+    Application.DisplayAlerts = False
+    originalEnableEvents = Application.EnableEvents
+    Application.EnableEvents = False
+
+    On Error GoTo ErrorHandlerDelete ' エラー発生時の処理へジャンプ
+
+    ' --- ③ 外部ファイルを開いて削除準備 ---
+    ' ファイルが既に開かれていないかチェック（二重編集を防ぐため）
+    Dim openedWbMain As Workbook
+    For Each openedWbMain In Application.Workbooks
+        If openedWbMain.FullName = m_TARGET_FILE_PATH Then
+            MsgBox "対象のExcelファイルが既に開かれています。閉じてから再度実行してください。", vbCritical
+            GoTo CleanUpDelete
+        End If
+    Next openedWbMain
+
+    ' 書き込みモードでファイルを開く
+    Set wbTarget = Application.Workbooks.Open(fileName:=m_TARGET_FILE_PATH, ReadOnly:=False, UpdateLinks:=0)
+
+    ' ファイルを開けなかったり、読み取り専用だった場合はエラー
+    If wbTarget Is Nothing Then
+        MsgBox "対象ファイルを開けませんでした。他のユーザーが書き込みロックしている可能性があります。", vbCritical
+        GoTo CleanUpDelete
+    End If
+    If wbTarget.ReadOnly Then
+        MsgBox "対象ファイルは読み取り専用で開かれました。このため、削除できません。他のユーザーが使用中か確認してください。", vbExclamation
+        GoTo CleanUpDelete
+    End If
+
+    ' 必要なシートが存在するかチェック
+    If Not SheetExists(wbTarget, m_DATA_SHEET_NAME) Then
+        MsgBox "データシート「" & m_DATA_SHEET_NAME & "」が見つかりません。", vbCritical
+        GoTo CleanUpDelete
+    End If
+    If Not SheetExists(wbTarget, m_KANRI_MASTER_NAME) Then
+        MsgBox "担当者マスタシート「" & m_KANRI_MASTER_NAME & "」が見つかりません。", vbCritical
+        GoTo CleanUpDelete
+    End If
+
+    Set wsTarget = wbTarget.Sheets(m_DATA_SHEET_NAME)
+    Set wsMaster = wbTarget.Sheets(m_KANRI_MASTER_NAME)
+
+    ' --- ④ 削除対象の行を正確に特定 ---
+    ' (担当者、工事名称、工事番号の3つ全てが一致する行を探す)
+    rowToDelete = 0
+    For r = wsTarget.Cells(wsTarget.Rows.count, "E").End(xlUp).Row To 2 Step -1
+        If Trim(CStr(wsTarget.Cells(r, "C").Value)) = Trim(tantoushaToDelete) And _
+           Trim(CStr(wsTarget.Cells(r, "E").Value)) = Trim(koujiNameToDelete) And _
+           Trim(CStr(wsTarget.Cells(r, "D").Value)) = Trim(koujiBangoToDelete) Then
+            rowToDelete = r
+            Exit For ' 見つかったのでループを抜ける
+        End If
+    Next r
+
+    ' 対象行が見つからなかった場合
+    If rowToDelete = 0 Then
+        MsgBox "削除対象のデータが見つかりませんでした。他のユーザーが既に削除した可能性があります。", vbExclamation
+        GoTo CleanUpDelete
+    End If
+
+    ' --- ⑤ 行を削除し、ファイルを保存 ---
+    wsTarget.Rows(rowToDelete).Delete
+
+    ' --- ⑥ このツール内のシートも最新の状態に更新 ---
+    wbTarget.Save
+    Call UpdateLocalListSheet(wsTarget, wsMaster)
+
+    MsgBox "削除が完了しました。", vbInformation
+
+CleanUpDelete: ' 終了処理
+    ' オブジェクトを解放し、Excelの設定を元に戻す
+    If Not wsMaster Is Nothing Then Set wsMaster = Nothing
+    If Not wsTarget Is Nothing Then Set wsTarget = Nothing
+    If Not wbTarget Is Nothing Then wbTarget.Close SaveChanges:=False
+
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = originalDisplayAlerts
+    Application.EnableEvents = originalEnableEvents
+
+    Unload Me ' フォームを閉じる
+    Exit Sub
+
+ErrorHandlerDelete: ' エラー発生時の処理
+    MsgBox "削除処理中にエラーが発生しました: " & Err.Description, vbCritical
+    Resume CleanUpDelete
+End Sub
+
+
+'================================================================================
+' このツール内の「工事一覧」シートを、外部ファイルの最新情報に更新する処理
+'================================================================================
+Private Sub UpdateLocalListSheet(ByVal wsSource As Worksheet, ByVal wsMaster As Worksheet)
+    ' (このサブルーチンは、登録フォームの時と同じ機能です)
+    Dim wsDest As Worksheet
+    Dim destSheetName As String
+    Dim lastRowSource As Long
+    Dim copyRange As Range
+    Dim dataArray As Variant
+    Dim c As Long
+    Dim currentColumnWidth As Double
+    Dim originalDisplayAlerts As Boolean
+    Dim originalEnableEvents As Boolean
+
+    ' 処理中の不要なメッセージを抑制
+    originalDisplayAlerts = Application.DisplayAlerts
+    originalEnableEvents = Application.EnableEvents
+    Application.DisplayAlerts = False
+    Application.EnableEvents = False
+
+    On Error GoTo ErrorHandlerUpdateLocal
+
+    ' コピー先のシート名を「管理マスタ」のG5セルから取得
+    destSheetName = Trim(CStr(wsMaster.Range("G5").Value))
+    If destSheetName = "" Then
+        MsgBox "「管理マスタ」G5セルにシート名が指定されていません。", vbExclamation
+        GoTo FinalizeUpdateLocal
+    End If
+
+    ' このツール内にコピー先シートが存在するかチェック
+    On Error Resume Next
+    Set wsDest = ThisWorkbook.Sheets(destSheetName)
+    On Error GoTo ErrorHandlerUpdateLocal
+    If wsDest Is Nothing Then
+        MsgBox "このファイルに「" & destSheetName & "」が見つかりませんでした。", vbExclamation
+        GoTo FinalizeUpdateLocal
+    End If
+
+    ' --- データのコピー処理 ---
+    ' 既存のデータをクリア
+    wsDest.Range("A3:X" & wsDest.Rows.count).ClearContents
+
+    ' コピー元の最終行を取得
+    lastRowSource = wsSource.Cells(wsSource.Rows.count, "A").End(xlUp).Row
+
+    ' コピー元の範囲をA5からX列の最終行までとする
+    If lastRowSource < 5 Then
+        Set copyRange = Nothing ' データがなければ何もしない
+    Else
+        Set copyRange = wsSource.Range("A5:X" & lastRowSource)
+    End If
+
+    If Not copyRange Is Nothing Then
+        ' 値を配列に一度格納してから転記（高速化のため）
+        dataArray = copyRange.Value
+        wsDest.Range("A3").Resize(UBound(dataArray, 1), UBound(dataArray, 2)).Value = dataArray
+
+        ' 書式崩れを防ぐため、列幅を一つずつコピー
+        For c = 1 To copyRange.Columns.count
+            currentColumnWidth = wsSource.Columns(copyRange.Column + c - 1).ColumnWidth
+            wsDest.Columns(wsDest.Range("A1").Column + c - 1).ColumnWidth = currentColumnWidth
+        Next c
+    End If
+
+FinalizeUpdateLocal: ' 終了処理
+    ' Excelの設定を元に戻す
+    Application.CutCopyMode = False
+    Application.DisplayAlerts = originalDisplayAlerts
+    Application.EnableEvents = originalEnableEvents
+    Exit Sub
+
+ErrorHandlerUpdateLocal: ' エラー発生時の処理
+    MsgBox "ローカルシート更新中に予期せぬエラー発生: " & Err.Description, vbCritical
+    Resume FinalizeUpdateLocal
+End Sub
+
+' 補足：シート存在チェック用の関数
+' 指定されたブックに特定の名前のシートが存在するかどうかを調べる
+Private Function SheetExists(ByVal wb As Workbook, ByVal sheetName As String) As Boolean
+    Dim ws As Worksheet
+    On Error Resume Next
+    Set ws = wb.Sheets(sheetName)
+    On Error GoTo 0
+    SheetExists = Not ws Is Nothing
+End Function
+
