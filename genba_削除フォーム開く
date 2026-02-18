@@ -1,0 +1,23 @@
+Option Explicit
+
+' --- 「削除フォーム」を開くボタンに登録するマクロ ---
+Sub StartSakujoProcess()
+    '--- 処理開始前に画面の更新を停止 ---
+    Application.ScreenUpdating = False
+    On Error GoTo ErrorHandler ' エラーが発生しても必ず画面更新をONに戻すため
+
+    ' 削除フォームをメモリに作成し、表示する
+    Dim frmSakujo As New 削除フォーム
+    frmSakujo.Show
+    
+    ' フォームが閉じられたら、メモリから解放する
+    Unload frmSakujo
+
+ErrorHandler:
+    '--- 処理終了後に画面の更新を必ず再開 ---
+    Application.ScreenUpdating = True
+    If Err.Number <> 0 Then
+        ' 何らかのエラーが発生した場合にメッセージを表示
+        MsgBox "エラーが発生しました: " & Err.Description, vbCritical
+    End If
+End Sub
