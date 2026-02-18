@@ -1,0 +1,308 @@
+Option Explicit
+
+'--- 初期設定 ---
+' Trueにすると、下のテスト用ファイルパスが使われる（開発者向け）
+Private Const IS_TEST_MODE As Boolean = False
+' テスト時に使用する「工事番号管理表.xlsm」の場所
+Private Const m_TEST_FILE_PATH_FOR_TEST As String = "Z:\Users\n-machida\Desktop\工事番号管理表.xlsm"
+
+'--- シート名定義 ---
+Private Const m_DATA_SHEET_NAME As String = "工事番号一覧"
+Private Const m_KANRI_MASTER_NAME As String = "管理マスタ"
+Private Const m_IRAI_RIREKI_SHEET_NAME As String = "依頼履歴"
+
+
+' 既存のコード（StartSaitourokuProcess, StartIraishoProcess, StartDeleteProcess）
+' はこのコードブロックの上にそのまま残してください。
+
+'================================================================================
+' ★★★「工事番号一覧」と「依頼履歴」を両方更新するマクロ ★★★
+'================================================================================
+Sub UpdateAllSheets()
+    Dim originalScreenUpdating As Boolean
+    Dim originalDisplayAlerts As Boolean
+    Dim originalEnableEvents As Boolean
+
+    ' --- 処理中の画面のちらつきや不要なメッセージを抑制し、高速化 ---
+    originalScreenUpdating = Application.ScreenUpdating
+    originalDisplayAlerts = Application.DisplayAlerts
+    originalEnableEvents = Application.EnableEvents
+    
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+    Application.EnableEvents = False
+    
+    On Error GoTo ErrorHandlerUpdateAll
+    
+    ' --- 1. 工事番号一覧を更新 ---
+    Call UpdateKoujiBangoListSheet(False) ' メッセージボックスを非表示で実行
+    
+    ' --- 2. 依頼履歴を更新 ---
+    Call UpdateIraiRirekiSheet(False) ' メッセージボックスを非表示で実行
+    
+    ' --- 3. 完了メッセージ ---
+    MsgBox "「工事番号一覧」と「依頼履歴」シートが正常に更新されました。", vbInformation, "更新完了"
+    
+FinalizeUpdateAll:
+    ' --- Excelの設定を元に戻す ---
+    Application.ScreenUpdating = originalScreenUpdating
+    Application.DisplayAlerts = originalDisplayAlerts
+    Application.EnableEvents = originalEnableEvents
+    Exit Sub
+
+ErrorHandlerUpdateAll:
+    MsgBox "一括更新中にエラーが発生しました: " & Err.Description, vbCritical, "更新エラー"
+    Resume FinalizeUpdateAll
+End Sub
+
+
+'================================================================================
+' 「工事番号一覧」シートを最新の情報に更新するマクロ
+' このマクロは、シート上のボタンなどに割り当てて手動で実行することを想定しています。
+'================================================================================
+Sub UpdateKoujiBangoListSheet(Optional ByVal ShowMessage As Boolean = True)
+    Dim wbTarget As Workbook
+    Dim wsSource As Worksheet ' コピー元：外部ファイルの「工事番号一覧」シート
+    Dim wsMaster As Worksheet ' 設定取得用：外部ファイルの「管理マスタ」シート
+    Dim wsDest As Worksheet   ' コピー先：このツール内の「工事番号一覧」シート
+    Dim targetFilePath As String
+    Dim destSheetName As String
+    Dim lastRowSource As Long
+    Dim copyRange As Range
+
+    Dim originalDisplayAlerts As Boolean
+    Dim originalEnableEvents As Boolean
+    Dim originalScreenUpdating As Boolean
+
+    ' --- 処理中の画面のちらつきや不要なメッセージを抑制し、高速化 ---
+    originalScreenUpdating = Application.ScreenUpdating
+    originalDisplayAlerts = Application.DisplayAlerts
+    originalEnableEvents = Application.EnableEvents
+    
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+    Application.EnableEvents = False
+
+    ' エラーが発生した場合は「ErrorHandlerUpdateList」へジャンプ
+    On Error GoTo ErrorHandlerUpdateList
+
+    ' --- 1. 外部ファイルのパスを取得 ---
+    If IS_TEST_MODE Then
+        targetFilePath = m_TEST_FILE_PATH_FOR_TEST ' テストモード
+    Else
+        targetFilePath = Trim(CStr(ThisWorkbook.Sheets("入力フォーム").Range("A36").Value)) ' 通常モード
+    End If
+
+    ' ファイルが存在するかチェック
+    If Dir(targetFilePath) = "" Then
+        MsgBox "対象のファイルが見つかりません。" & vbCrLf & targetFilePath, vbCritical, "ファイルエラー"
+        GoTo FinalizeUpdateList ' 終了処理へ
+    End If
+
+    ' --- 2. 外部ファイルを読み取り専用で開く ---
+    On Error Resume Next ' ファイルオープン時のエラーを一時的に無視
+    Set wbTarget = Application.Workbooks.Open(fileName:=targetFilePath, ReadOnly:=True, UpdateLinks:=0)
+    On Error GoTo ErrorHandlerUpdateList ' エラーハンドリングを再開
+
+    ' ファイルを開けなかった場合（他の人が使用中など）
+    If wbTarget Is Nothing Then
+        MsgBox "対象のExcelファイルを開けませんでした。" & vbCrLf & _
+               "他のユーザーが使用中である可能性があります。", vbCritical
+        GoTo FinalizeUpdateList
+    End If
+
+    ' --- 3. 外部ファイルから必要なシートを取得 ---
+    If Not SheetExists(wbTarget, m_DATA_SHEET_NAME) Or Not SheetExists(wbTarget, m_KANRI_MASTER_NAME) Then
+        MsgBox "外部ファイルに必要なシート「" & m_DATA_SHEET_NAME & "」または「" & m_KANRI_MASTER_NAME & "」が見つかりません。", vbCritical, "シートエラー"
+        GoTo FinalizeUpdateList
+    End If
+    Set wsSource = wbTarget.Sheets(m_DATA_SHEET_NAME) ' コピー元のデータがあるシート
+    Set wsMaster = wbTarget.Sheets(m_KANRI_MASTER_NAME)   ' コピー先のシート名が書かれているシート
+
+    ' --- 4. このツール内のコピー先シートを特定 ---
+    destSheetName = Trim(CStr(wsMaster.Range("G5").Value))
+    If destSheetName = "" Then
+        MsgBox "外部ファイルの「" & m_KANRI_MASTER_NAME & "」シートG5セルにコピー先のシート名が指定されていません。", vbExclamation
+        GoTo FinalizeUpdateList
+    End If
+
+    ' このツール内に、指定された名前のシートがあるか確認
+    If Not SheetExists(ThisWorkbook, destSheetName) Then
+        MsgBox "このファイルにコピー先のシート「" & destSheetName & "」が見つかりませんでした。", vbExclamation
+        GoTo FinalizeUpdateList
+    End If
+    Set wsDest = ThisWorkbook.Sheets(destSheetName)
+
+    ' --- 5. データのコピー処理を実行 ---
+    wsDest.Unprotect ' コピー先の保護を一時的に解除
+
+    wsDest.Range("A3:X" & wsDest.Rows.count).Clear
+
+    ' コピー元の最終行を取得
+    lastRowSource = wsSource.Cells(wsSource.Rows.count, "A").End(xlUp).Row
+
+    ' コピー元の範囲をA5からX列の最終行までとする
+    If lastRowSource < 5 Then
+        Set copyRange = Nothing ' データがなければ何もしない
+    Else
+        Set copyRange = wsSource.Range("A5:X" & lastRowSource)
+    End If
+
+    ' コピー対象のデータが存在する場合のみ実行
+    If Not copyRange Is Nothing Then
+        copyRange.Copy Destination:=wsDest.Range("A3")
+    End If
+
+    ' 正常終了のメッセージを表示（引数がTrueの場合のみ）
+    If ShowMessage Then
+        MsgBox "「" & destSheetName & "」シートが正常に更新されました。", vbInformation, "更新完了"
+    End If
+
+FinalizeUpdateList: ' 終了処理（正常終了でもエラー発生でも必ずここを通る）
+    ' --- 後片付け ---
+    Application.CutCopyMode = False ' コピー・切り取りモードを解除
+
+    ' 開いたオブジェクトを解放（メモリをクリーンにする）
+    If Not wsMaster Is Nothing Then Set wsMaster = Nothing
+    If Not wsSource Is Nothing Then Set wsSource = Nothing
+    If Not wsDest Is Nothing Then Set wsDest = Nothing
+    If Not wbTarget Is Nothing Then wbTarget.Close SaveChanges:=False ' 外部ブックを保存せずに閉じる
+
+    ' --- Excelの設定を元に戻す ---
+    Application.ScreenUpdating = originalScreenUpdating
+    Application.DisplayAlerts = originalDisplayAlerts
+    Application.EnableEvents = originalEnableEvents
+    Exit Sub
+
+ErrorHandlerUpdateList: ' エラー発生時の処理
+    MsgBox "「" & m_DATA_SHEET_NAME & "」シートの更新中にエラーが発生しました: " & Err.Description, vbCritical, "更新エラー"
+    Resume FinalizeUpdateList ' エラー発生後も、必ず終了処理（FinalizeUpdateList）を実行する
+End Sub
+
+
+'================================================================================
+' 「依頼履歴」シートを最新の情報に更新するマクロ
+'================================================================================
+Sub UpdateIraiRirekiSheet(Optional ByVal ShowMessage As Boolean = True)
+    Dim wbTarget As Workbook
+    Dim wsSource As Worksheet ' コピー元：外部ファイルの「依頼履歴」シート
+    Dim wsDest As Worksheet   ' コピー先：このツール内の「依頼履歴」シート
+    Dim targetFilePath As String
+    Dim lastRowSource As Long
+    Dim copyRange As Range
+    
+    Dim originalDisplayAlerts As Boolean
+    Dim originalEnableEvents As Boolean
+    Dim originalScreenUpdating As Boolean
+
+    ' --- 処理中の画面のちらつきや不要なメッセージを抑制し、高速化 ---
+    originalScreenUpdating = Application.ScreenUpdating
+    originalDisplayAlerts = Application.DisplayAlerts
+    originalEnableEvents = Application.EnableEvents
+    
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+    Application.EnableEvents = False
+
+    ' エラーが発生した場合は「ErrorHandlerUpdateRireki」へジャンプ
+    On Error GoTo ErrorHandlerUpdateRireki
+
+    ' --- 1. 外部ファイルのパスを取得 ---
+    If IS_TEST_MODE Then
+        targetFilePath = m_TEST_FILE_PATH_FOR_TEST ' テストモード
+    Else
+        targetFilePath = Trim(CStr(ThisWorkbook.Sheets("入力フォーム").Range("A36").Value)) ' 通常モード
+    End If
+
+    ' ファイルが存在するかチェック
+    If Dir(targetFilePath) = "" Then
+        MsgBox "対象のファイルが見つかりません。" & vbCrLf & targetFilePath, vbCritical, "ファイルエラー"
+        GoTo FinalizeUpdateRireki ' 終了処理へ
+    End If
+
+    ' --- 2. 外部ファイルを読み取り専用で開く ---
+    On Error Resume Next ' ファイルオープン時のエラーを一時的に無視
+    Set wbTarget = Application.Workbooks.Open(fileName:=targetFilePath, ReadOnly:=True, UpdateLinks:=0)
+    On Error GoTo ErrorHandlerUpdateRireki ' エラーハンドリングを再開
+
+    ' ファイルを開けなかった場合（他の人が使用中など）
+    If wbTarget Is Nothing Then
+        MsgBox "対象のExcelファイルを開けませんでした。" & vbCrLf & _
+               "他のユーザーが使用中である可能性があります。", vbCritical
+        GoTo FinalizeUpdateRireki
+    End If
+
+    ' --- 3. 必要なシートの存在チェック ---
+    ' 外部ファイル
+    If Not SheetExists(wbTarget, m_IRAI_RIREKI_SHEET_NAME) Then
+        MsgBox "外部ファイルに必要なシート「" & m_IRAI_RIREKI_SHEET_NAME & "」が見つかりません。", vbCritical, "シートエラー"
+        GoTo FinalizeUpdateRireki
+    End If
+    Set wsSource = wbTarget.Sheets(m_IRAI_RIREKI_SHEET_NAME) ' コピー元のデータがあるシート
+    
+    ' このツール内（ローカル）
+    If Not SheetExists(ThisWorkbook, m_IRAI_RIREKI_SHEET_NAME) Then
+        MsgBox "このファイルにコピー先のシート「" & m_IRAI_RIREKI_SHEET_NAME & "」が見つかりませんでした。", vbExclamation
+        GoTo FinalizeUpdateRireki
+    End If
+    Set wsDest = ThisWorkbook.Sheets(m_IRAI_RIREKI_SHEET_NAME)
+
+    ' --- 4. データのコピー処理を実行 ---
+    wsDest.Unprotect ' コピー先の保護を一時的に解除
+    
+    ' ローカルシートの3行目以降（ヘッダー(2行目)を除く）をクリア
+    wsDest.Range("A3:W" & wsDest.Rows.count).Clear
+
+    ' コピー元の最終行を取得（外部ファイルは1行目がヘッダー）
+    lastRowSource = wsSource.Cells(wsSource.Rows.count, "A").End(xlUp).Row
+
+    ' コピー元の範囲をA2（データ開始行）からW列の最終行までとする
+    If lastRowSource < 2 Then
+        Set copyRange = Nothing ' データがなければ何もしない
+    Else
+        Set copyRange = wsSource.Range("A2:W" & lastRowSource)
+    End If
+
+    ' コピー対象のデータが存在する場合のみ実行
+    If Not copyRange Is Nothing Then
+        ' ローカルシートのA3（データ開始行）に貼り付け
+        copyRange.Copy Destination:=wsDest.Range("A3")
+    End If
+
+    ' 正常終了のメッセージを表示（引数がTrueの場合のみ）
+    If ShowMessage Then
+        MsgBox "「" & m_IRAI_RIREKI_SHEET_NAME & "」シートが正常に更新されました。", vbInformation, "更新完了"
+    End If
+
+FinalizeUpdateRireki: ' 終了処理（正常終了でもエラー発生でも必ずここを通る）
+    ' --- 後片付け ---
+    Application.CutCopyMode = False ' コピー・切り取りモードを解除
+
+    ' 開いたオブジェクトを解放（メモリをクリーンにする）
+    If Not wsSource Is Nothing Then Set wsSource = Nothing
+    If Not wsDest Is Nothing Then Set wsDest = Nothing
+    If Not wbTarget Is Nothing Then wbTarget.Close SaveChanges:=False ' 外部ブックを保存せずに閉じる
+
+    ' --- Excelの設定を元に戻す ---
+    Application.ScreenUpdating = originalScreenUpdating
+    Application.DisplayAlerts = originalDisplayAlerts
+    Application.EnableEvents = originalEnableEvents
+    Exit Sub
+
+ErrorHandlerUpdateRireki: ' エラー発生時の処理
+    MsgBox "「" & m_IRAI_RIREKI_SHEET_NAME & "」シートの更新中にエラーが発生しました: " & Err.Description, vbCritical, "更新エラー"
+    Resume FinalizeUpdateRireki ' エラー発生後も、必ず終了処理（FinalizeUpdateRireki）を実行する
+End Sub
+
+
+' 補足：シート存在チェック用の関数
+Private Function SheetExists(ByVal wb As Workbook, ByVal sheetName As String) As Boolean
+    Dim ws As Worksheet
+    On Error Resume Next
+    Set ws = wb.Sheets(sheetName)
+    On Error GoTo 0
+    SheetExists = Not ws Is Nothing
+End Function
+
+
+
