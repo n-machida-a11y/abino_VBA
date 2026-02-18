@@ -1,0 +1,95 @@
+' 標準モジュール
+
+Option Explicit
+
+'================================================================================
+' メイン処理を呼び出すマクロ
+'================================================================================
+
+' --- 「編集・再登録」ボタンに登録するマクロ ---
+Sub StartSaitourokuProcess()
+    Dim frmSelect As New 工事名称選択
+    Dim frmSaitorokui As 再登録
+    
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+    Application.EnableEvents = False
+    
+    On Error GoTo ErrorHandler_Saitouroku
+
+    frmSelect.Show
+
+    If Not frmSelect.Cancelled Then
+        Set frmSaitorokui = New 再登録
+        frmSaitorokui.SearchedKoujiName = frmSelect.selectedKoujiName
+        frmSaitorokui.SelectedTantousha = frmSelect.SelectedTantousha
+        frmSaitorokui.Show
+    End If
+    
+    Unload frmSelect
+
+Finalize_Saitouroku:
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+    Application.EnableEvents = True
+    Set frmSelect = Nothing
+    Set frmSaitorokui = Nothing
+    Exit Sub
+
+ErrorHandler_Saitouroku:
+    MsgBox "エラーが発生しました: " & Err.Description, vbCritical
+    Resume Finalize_Saitouroku
+End Sub
+
+' --- 「依頼書作成」ボタンに登録するマクロ ---
+Sub StartIraishoProcess()
+    Dim frmSelect As New 工事名称選択
+    Dim frmIraisho As 依頼書作成
+    
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+    Application.EnableEvents = False
+
+    On Error GoTo ErrorHandler_Iraisho
+
+    frmSelect.Show
+
+    If Not frmSelect.Cancelled Then
+        Set frmIraisho = New 依頼書作成
+        frmIraisho.SetupAndShow frmSelect.selectedKoujiName, frmSelect.SelectedTantousha
+    End If
+
+    Unload frmSelect
+
+Finalize_Iraisho:
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+    Application.EnableEvents = True
+    Set frmSelect = Nothing
+    Set frmIraisho = Nothing
+    Exit Sub
+
+ErrorHandler_Iraisho:
+    MsgBox "エラーが発生しました: " & Err.Description, vbCritical
+    Resume Finalize_Iraisho
+End Sub
+
+'================================================================================
+' 汎用ヘルパー関数
+'================================================================================
+
+Public Function SheetExists(ByVal wb As Workbook, ByVal sheetName As String) As Boolean
+    Dim ws As Worksheet
+    On Error Resume Next
+    Set ws = wb.Sheets(sheetName)
+    On Error GoTo 0
+    SheetExists = Not ws Is Nothing
+End Function
+
+Public Function FormatIfDate(ByVal Value As Variant) As String
+    If IsDate(Value) Then
+        FormatIfDate = Format(Value, "yyyy/mm/dd")
+    Else
+        FormatIfDate = ""
+    End If
+End Function
