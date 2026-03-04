@@ -323,8 +323,15 @@ Private Sub 依頼書作成_Click()
     Set wbTarget_Click = Application.Workbooks.Open(fileName:=targetFilePath, ReadOnly:=False, UpdateLinks:=0)
     On Error GoTo ErrorHandlerClick
 
-    If wbTarget_Click Is Nothing Then GoTo CleanUpClick
-    If wbTarget_Click.ReadOnly Then GoTo CleanUpClick
+    If wbTarget_Click Is Nothing Then
+        MsgBox "対象のExcelファイルを開けませんでした。処理を中断します。", vbCritical
+        GoTo CleanUpClick
+    End If
+    If wbTarget_Click.ReadOnly Then
+        MsgBox "対象のExcelファイルは読み取り専用で開かれました。" & vbCrLf & _
+               "他のユーザーが使用中の可能性があります。処理を中断します。", vbExclamation
+        GoTo CleanUpClick
+    End If
 
     ' 必要なシートが存在するかチェック
     If Not SheetExists(wbTarget_Click, m_DATA_SHEET_NAME) Or _
@@ -549,19 +556,20 @@ Private Sub AddDataToIraiRireki(ByVal wsRireki As Worksheet)
     End If
     
     ' --- 2. 依頼NOを自動採番 ("0301", "0302"...) ---
-    If lastRow < 2 Then ' データがまだない場合
-        nextNoNum = 1
-    Else
-        lastNoStr = wsRireki.Cells(lastRow, "A").Value
-        If IsNumeric(lastNoStr) And Len(lastNoStr) > 2 Then
-            ' "03"プレフィックスを想定して数値部分を取得
-            nextNoNum = Val(Mid(lastNoStr, 3)) + 1
-        Else
-            ' 予期せぬ値が入っていたら、とりあえず1からカウント
-            nextNoNum = 1
+    ' 【修正】最終行だけでなく全行を走査して最大番号を取得する。
+    '         並び替えや欠番があっても正しい連番を採番できる。
+    '         また Format の桁数を3桁に変更し、100件超えで桁溢れしないようにした。
+    Dim i As Long, maxNum As Long, cellVal As String, cellNum As Long
+    maxNum = 0
+    For i = 2 To lastRow
+        cellVal = Trim(CStr(wsRireki.Cells(i, "A").Value))
+        If Left(cellVal, 2) = "03" And IsNumeric(Mid(cellVal, 3)) Then
+            cellNum = CLng(Mid(cellVal, 3))
+            If cellNum > maxNum Then maxNum = cellNum
         End If
-    End If
-    newIraiNo = "03" & Format(nextNoNum, "00") ' "0301", "0399", "03100" のように連番を作成
+    Next i
+    nextNoNum = maxNum + 1
+    newIraiNo = "03" & Format(nextNoNum, "000")
 
     ' --- 3. データを書き込む ---
     With wsRireki
