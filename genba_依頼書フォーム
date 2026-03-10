@@ -556,20 +556,28 @@ Private Sub AddDataToIraiRireki(ByVal wsRireki As Worksheet)
     End If
     
     ' --- 2. 依頼NOを自動採番 ("0301", "0302"...) ---
-    ' 【修正】最終行だけでなく全行を走査して最大番号を取得する。
-    '         並び替えや欠番があっても正しい連番を採番できる。
-    '         また Format の桁数を3桁に変更し、100件超えで桁溢れしないようにした。
-    Dim i As Long, maxNum As Long, cellVal As String, cellNum As Long
+    ' 全行を走査して最大の連番を取得する。
+    ' Excelが先頭ゼロを自動削除して数値保存する場合（例: "0301"→301）も考慮し
+    ' 301〜399の数値も旧形式（"03XX"の先頭ゼロ落ち）として検出する。
+    Dim i As Long, maxNum As Long, cellVal As String, cellNum As Long, numVal As Long
     maxNum = 0
     For i = 2 To lastRow
         cellVal = Trim(CStr(wsRireki.Cells(i, "A").Value))
         If Left(cellVal, 2) = "03" And IsNumeric(Mid(cellVal, 3)) Then
+            ' テキスト形式: "0301", "0302" など
             cellNum = CLng(Mid(cellVal, 3))
             If cellNum > maxNum Then maxNum = cellNum
+        ElseIf IsNumeric(cellVal) Then
+            ' 数値として保存された旧形式: 301〜399（="0301"〜"0399"の先頭ゼロ落ち）
+            numVal = CLng(cellVal)
+            If numVal >= 301 And numVal <= 399 Then
+                cellNum = numVal - 300
+                If cellNum > maxNum Then maxNum = cellNum
+            End If
         End If
     Next i
     nextNoNum = maxNum + 1
-    newIraiNo = "03" & Format(nextNoNum, "000")
+    newIraiNo = "03" & Format(nextNoNum, "00")
 
     ' --- 3. データを書き込む ---
     With wsRireki
