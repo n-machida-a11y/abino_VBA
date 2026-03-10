@@ -540,7 +540,7 @@ Private Sub 提出日付_Exit(ByVal Cancel As MSForms.ReturnBoolean): Call Valid
 
 ' フォームの入力内容を、外部ファイルの「依頼履歴」シートに追記する
 Private Function AddDataToIraiRireki(ByVal wsRireki As Worksheet) As String
-    If wsRireki Is Nothing Then Exit Sub
+    If wsRireki Is Nothing Then Exit Function
 
     wsRireki.Unprotect
     
