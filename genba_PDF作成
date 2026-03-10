@@ -29,7 +29,15 @@ Public Sub SaveRequestFormAsPDF()
     End If
     
     '--- 保存先フォルダ ---
-    saveFolder = Environ("USERPROFILE") & "\Downloads"
+    ' USERPROFILE が実際のドライブと異なる環境に対応するため
+    ' Z:\Users\ユーザー名\Downloads を優先して使用する
+    Dim userName As String
+    userName = Environ("USERNAME")
+    If Dir("Z:\Users\" & userName & "\Downloads", vbDirectory) <> "" Then
+        saveFolder = "Z:\Users\" & userName & "\Downloads"
+    Else
+        saveFolder = Environ("USERPROFILE") & "\Downloads"
+    End If
     
     '--- ③ PDFのファイル名をシートのセルから作成 ---
     recipient = wsRequest.Range("F7").Value
