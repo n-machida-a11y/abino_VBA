@@ -28,10 +28,17 @@ Public Sub SaveRequestFormAsPDF()
         Exit Sub
     End If
     
-    '--- 修正箇所: 保存先を「ユーザーのダウンロードフォルダ」に設定 ---
-    ' 環境変数 "USERPROFILE" を利用して、ユーザーのプロファイルフォルダを取得し、
-    ' その中の "Downloads" フォルダを指定します。
-    saveFolder = Environ("USERPROFILE") & "\Downloads"
+    '--- 保存先フォルダを決定（日本語/英語Windows両対応）---
+    ' 「Downloads」→「ダウンロード」→「デスクトップ」の順で存在するフォルダを使用
+    Dim userProfile As String
+    userProfile = Environ("USERPROFILE")
+    If Dir(userProfile & "\Downloads", vbDirectory) <> "" Then
+        saveFolder = userProfile & "\Downloads"
+    ElseIf Dir(userProfile & "\ダウンロード", vbDirectory) <> "" Then
+        saveFolder = userProfile & "\ダウンロード"
+    Else
+        saveFolder = userProfile & "\Desktop"
+    End If
     
     '--- ③ PDFのファイル名をシートのセルから作成 ---
     recipient = wsRequest.Range("F7").Value
