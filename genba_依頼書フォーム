@@ -352,8 +352,7 @@ Private Sub 依頼書作成_Click()
     ' Call UpdateExternalFile(wsSrc, m_TargetRow)
     
     ' (2-2) 「依頼履歴」シートに、今回の依頼内容を新しい行として追記する
-    Dim generatedIraiNo As String
-    generatedIraiNo = AddDataToIraiRireki(wsRireki)
+    Call AddDataToIraiRireki(wsRireki)
     
     ' (2-4) 「工事番号一覧」の色付け処理を停止（ユーザーの要望により）
     ' With wsSrc.Rows(m_TargetRow).Interior
@@ -371,7 +370,6 @@ Private Sub 依頼書作成_Click()
     wsRequest.Unprotect
 
     With wsRequest
-        .Range("R3").Value = generatedIraiNo
         .Range("F7").Value = Me.請求書提出先.Value
         .Range("G8").Value = Me.郵便番号.Value & "　" & Me.住所.Value
         .Range("M10").Value = Me.工事名称.Value
@@ -539,8 +537,8 @@ Private Sub 提出日付_Exit(ByVal Cancel As MSForms.ReturnBoolean): Call Valid
 '================================================================================
 
 ' フォームの入力内容を、外部ファイルの「依頼履歴」シートに追記する
-Private Function AddDataToIraiRireki(ByVal wsRireki As Worksheet) As String
-    If wsRireki Is Nothing Then Exit Function
+Private Sub AddDataToIraiRireki(ByVal wsRireki As Worksheet)
+    If wsRireki Is Nothing Then Exit Sub
 
     wsRireki.Unprotect
     
@@ -625,8 +623,13 @@ Private Function AddDataToIraiRireki(ByVal wsRireki As Worksheet) As String
         End If
     End With
 
-    AddDataToIraiRireki = newIraiNo ' 採番した依頼NOを返す
-End Function
+    ' PDF作成時にR3へ依頼NOを転記できるよう、請求書提出依頼書シートに書き込む
+    Dim wsReq As Worksheet
+    On Error Resume Next
+    Set wsReq = ThisWorkbook.Sheets("請求書提出依頼書")
+    On Error GoTo 0
+    If Not wsReq Is Nothing Then wsReq.Range("R3").Value = newIraiNo
+End Sub
 
 
 ' 日付の形式が正しいかチェックし、自動で書式を整える
