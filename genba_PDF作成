@@ -28,17 +28,8 @@ Public Sub SaveRequestFormAsPDF()
         Exit Sub
     End If
     
-    '--- 保存先フォルダを決定（日本語/英語Windows両対応）---
-    ' 「Downloads」→「ダウンロード」→「デスクトップ」の順で存在するフォルダを使用
-    Dim userProfile As String
-    userProfile = Environ("USERPROFILE")
-    If Dir(userProfile & "\Downloads", vbDirectory) <> "" Then
-        saveFolder = userProfile & "\Downloads"
-    ElseIf Dir(userProfile & "\ダウンロード", vbDirectory) <> "" Then
-        saveFolder = userProfile & "\ダウンロード"
-    Else
-        saveFolder = userProfile & "\Desktop"
-    End If
+    '--- 保存先フォルダ ---
+    saveFolder = Environ("USERPROFILE") & "\Downloads"
     
     '--- ③ PDFのファイル名をシートのセルから作成 ---
     recipient = wsRequest.Range("F7").Value
@@ -58,8 +49,15 @@ Public Sub SaveRequestFormAsPDF()
     
     wsRequest.Activate
     
+    Application.ScreenUpdating = True
     On Error Resume Next
-    wsRequest.ExportAsFixedFormat Type:=xlTypePDF, fileName:=fullPath, Quality:=xlQualityStandard
+    wsRequest.ExportAsFixedFormat _
+        Type:=xlTypePDF, _
+        fileName:=fullPath, _
+        Quality:=xlQualityStandard, _
+        IncludeDocProperties:=False, _
+        IgnorePrintAreas:=False, _
+        OpenAfterPublish:=False
     If Err.Number <> 0 Then exportError = Err.Description
     On Error GoTo 0
 
