@@ -652,7 +652,7 @@ Private Sub CalculateTotals()
     val2 = Val(Replace(Me.金額2.Value, ",", ""))
     val3 = Val(Replace(Me.金額3.Value, ",", ""))
     subTotal = val1 + val2 + val3
-    tax = Round(subTotal * 0.1, 0) ' 消費税10%を計算（四捨五入）
+    tax = Application.WorksheetFunction.Round(subTotal * 0.1, 0) ' 消費税10%を計算（四捨五入）
     grandTotal = subTotal + tax
     Me.小計.Value = Format(subTotal, "#,##0")
     Me.消費税.Value = Format(tax, "#,##0")
