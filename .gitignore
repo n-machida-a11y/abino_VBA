@@ -1,0 +1,24 @@
+# Excel files (binary, may contain data)
+*.xlsm
+*.xlsx
+*.xlsb
+
+# Screenshots / images
+*.png
+*.jpg
+*.jpeg
+*.gif
+
+# Distribution zips (can be regenerated)
+*.zip
+
+# Claude config
+.claude/
+
+# Subdirectories with local data
+kouban_kanri/
+kouban_keiri/
+
+# OS files
+.DS_Store
+Thumbs.db
