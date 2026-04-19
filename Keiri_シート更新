@@ -83,8 +83,11 @@ Public Sub マクロ_上書き保存()
     End If
 
     Call WriteDataToRireki(wsRireki, wsSearch, foundRange.Row, False, autoReason, "")
-    Call SyncAllDataToMaster(targetIraiNo, False, autoReason)
-    MsgBox "同期完了しました。", vbInformation
+    ' マスタ同期成功時のみローカル物理保存。失敗時は保存せずロールバック可能に。
+    If SyncAllDataToMaster(targetIraiNo, False, autoReason) Then
+        ThisWorkbook.Save
+        MsgBox "同期完了しました。", vbInformation
+    End If
 End Sub
 
 Public Sub マクロ_新規作成()
@@ -129,9 +132,12 @@ Public Sub マクロ_新規作成()
     End If
     
     Call WriteDataToRireki(wsRireki, wsSearch, nextRow, True, "", oldIraiNo)
-    Call SyncAllDataToMaster(newIraiNo, True, logMsg)
-    
-    MsgBox "新規登録完了しました。" & vbCrLf & "新ID: " & newIraiNo, vbInformation
+    ' 新ID告知を同期の前に出す。失敗時は「新規発行→同期エラー」の順で表示される。
+    MsgBox "新規発行: " & newIraiNo, vbInformation
+    ' マスタ同期成功時のみローカル物理保存。
+    If SyncAllDataToMaster(newIraiNo, True, logMsg) Then
+        ThisWorkbook.Save
+    End If
 End Sub
 
 '================================================================================
@@ -237,7 +243,8 @@ Private Sub WriteDataToRireki(wsRireki As Worksheet, wsSearch As Worksheet, targ
     
     wsSearch.Range(CELL_HISTORY).Value = wsRireki.Cells(targetRow, 24).Value
     wsSearch.Range(CELL_MEMO).Value = wsRireki.Cells(targetRow, 25).Value
-    ThisWorkbook.Save
+    ' ThisWorkbook.Save は呼び出し元で「マスタ同期成功時のみ」実行する
+    ' （先に物理保存するとマスタ同期失敗時にローカルだけ新値で残って不整合になる）
 End Sub
 
 Private Function GetDifferenceLog(wsRireki As Worksheet, wsSearch As Worksheet, targetRow As Long) As String
@@ -269,14 +276,23 @@ Private Function GetDifferenceLog(wsRireki As Worksheet, wsSearch As Worksheet, 
     GetDifferenceLog = log
 End Function
 
-Public Sub SyncAllDataToMaster(ByVal targetIraiNo As String, ByVal isNew As Boolean, ByVal logMsg As String)
+Public Function SyncAllDataToMaster(ByVal targetIraiNo As String, ByVal isNew As Boolean, ByVal logMsg As String) As Boolean
+    SyncAllDataToMaster = False  ' 既定は失敗。全処理成功で True
+
     Dim mPath As String, wbM As Workbook, wsM As Worksheet, wsS As Worksheet
     Dim targetRow As Long
     
     Set wsS = ThisWorkbook.Sheets(m_IRAI_SEARCH_SHEET_NAME)
     mPath = GetMasterPath()
     
-    If Dir(mPath) = "" Then Exit Sub
+    If Dir(mPath) = "" Then
+        MsgBox "マスタファイルにアクセスできません。" & vbCrLf & _
+               "パス: " & mPath & vbCrLf & vbCrLf & _
+               "ネットワーク(Z:)の接続を確認してください。" & vbCrLf & vbCrLf & _
+               "変更はローカルRAMに残っていますが物理保存されていません。" & vbCrLf & _
+               "接続回復後、同じ操作を再実行してください。", vbCritical, "マスタ同期エラー"
+        Exit Function
+    End If
     
     Application.ScreenUpdating = False
     On Error Resume Next
@@ -333,7 +349,8 @@ Public Sub SyncAllDataToMaster(ByVal targetIraiNo As String, ByVal isNew As Bool
     wbM.Save
     wbM.Close False
     Application.ScreenUpdating = True
-End Sub
+    SyncAllDataToMaster = True  ' ここまで到達で成功
+End Function
 
 Public Function GetMasterPath() As String
     If IS_TEST_MODE Then
