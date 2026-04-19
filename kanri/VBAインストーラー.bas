@@ -94,6 +94,20 @@ Public Sub InstallAll()
         End If
     Next i
 
+    ' --- STEP 3: ThisWorkbookの更新（.clsがある場合のみ） ---
+    logText = logText & vbCrLf & "=== ThisWorkbook更新 ===" & vbCrLf
+    Dim twPath As String
+    twPath = sourceFolder & "ThisWorkbook.cls"
+    If Dir(twPath) <> "" Then
+        If UpdateThisWorkbook(twPath) Then
+            logText = logText & "  ○ ThisWorkbook 更新成功" & vbCrLf
+        Else
+            logText = logText & "  × ThisWorkbook 更新失敗" & vbCrLf
+        End If
+    Else
+        logText = logText & "  - ThisWorkbook.cls がないのでスキップ" & vbCrLf
+    End If
+
     Application.ScreenUpdating = True
     Application.DisplayAlerts = True
 
@@ -103,6 +117,59 @@ Public Sub InstallAll()
            "詳細:" & vbCrLf & logText, _
            vbInformation, "インストール結果"
 End Sub
+
+'================================================================================
+' ThisWorkbookコードを更新（.clsファイルからコード本体を取り出して挿入）
+'================================================================================
+Private Function UpdateThisWorkbook(ByVal clsPath As String) As Boolean
+    Dim fileNum As Integer
+    Dim fileContent As String
+    Dim codeText As String
+
+    fileNum = FreeFile
+    Open clsPath For Input As #fileNum
+    Do While Not EOF(fileNum)
+        Dim line As String
+        Line Input #fileNum, line
+        fileContent = fileContent & line & vbCrLf
+    Loop
+    Close #fileNum
+
+    ' ヘッダ属性行をスキップしてコード本体だけ取り出す
+    Dim lines() As String
+    lines = Split(fileContent, vbCrLf)
+    Dim i As Long
+    Dim inBody As Boolean
+    inBody = False
+    For i = 0 To UBound(lines)
+        Dim trimmed As String
+        trimmed = Trim(lines(i))
+        If Not inBody Then
+            If Left(trimmed, 9) = "VERSION 1" Or _
+               Left(trimmed, 5) = "BEGIN" Or _
+               Left(trimmed, 8) = "MultiUse" Or _
+               trimmed = "END" Or _
+               Left(trimmed, 9) = "Attribute" Then
+                ' スキップ
+            ElseIf trimmed = "" Then
+                If codeText <> "" Then codeText = codeText & vbCrLf
+            Else
+                inBody = True
+                codeText = codeText & lines(i) & vbCrLf
+            End If
+        Else
+            codeText = codeText & lines(i) & vbCrLf
+        End If
+    Next i
+
+    On Error Resume Next
+    Dim tw As Object
+    Set tw = ThisWorkbook.VBProject.VBComponents("ThisWorkbook").CodeModule
+    tw.DeleteLines 1, tw.CountOfLines
+    tw.AddFromString codeText
+    UpdateThisWorkbook = (Err.Number = 0)
+    On Error GoTo 0
+End Function
 
 Private Function SelectFolder() As String
     Dim fd As FileDialog
