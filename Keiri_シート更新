@@ -285,7 +285,16 @@ Public Function SyncAllDataToMaster(ByVal targetIraiNo As String, ByVal isNew As
     Set wsS = ThisWorkbook.Sheets(m_IRAI_SEARCH_SHEET_NAME)
     mPath = GetMasterPath()
     
-    If Dir(mPath) = "" Then
+    ' 空パス対策: Dir("") はエラー52を投げるので事前チェック
+    If Trim(mPath) = "" Then
+        MsgBox "マスタファイルのパスが設定されていません。" & vbCrLf & _
+               "依頼履歴シートの G1 セルにマスタファイルのパスを設定してください。", vbCritical
+        Exit Function
+    End If
+    On Error Resume Next
+    Dim dirChk As String: dirChk = Dir(mPath)
+    On Error GoTo 0
+    If dirChk = "" Then
         MsgBox "マスタファイルにアクセスできません。" & vbCrLf & _
                "パス: " & mPath & vbCrLf & vbCrLf & _
                "ネットワーク(Z:)の接続を確認してください。" & vbCrLf & vbCrLf & _
@@ -353,11 +362,15 @@ Public Function SyncAllDataToMaster(ByVal targetIraiNo As String, ByVal isNew As
 End Function
 
 Public Function GetMasterPath() As String
+    Dim p As String
+    On Error Resume Next
     If IS_TEST_MODE Then
-        GetMasterPath = m_TEST_FILE_PATH_FOR_TEST
+        p = m_TEST_FILE_PATH_FOR_TEST
     Else
-        GetMasterPath = Trim(CStr(ThisWorkbook.Sheets(m_IRAI_RIREKI_SHEET_NAME).Range("G1").Value))
+        p = Trim(CStr(ThisWorkbook.Sheets(m_IRAI_RIREKI_SHEET_NAME).Range("G1").Value))
     End If
+    On Error GoTo 0
+    GetMasterPath = p
 End Function
 
 Function ExecuteUpdateAndSearch() As Boolean
@@ -486,7 +499,23 @@ Function UpdateKeiriRirekiSheet(Optional ByVal ShowMessage As Boolean = True) As
     Application.ScreenUpdating = False
     p = GetMasterPath()
     
-    If Dir(p) = "" Then Exit Function
+    ' 空パス対策: Dir("") はエラー52(ファイル名または番号が不正)を投げるので事前チェック
+    If Trim(p) = "" Then
+        Application.ScreenUpdating = True
+        MsgBox "マスタファイルのパスが設定されていません。" & vbCrLf & _
+               "依頼履歴シートの G1 セルにマスタファイルのパスを設定してください。", vbCritical
+        Exit Function
+    End If
+
+    On Error Resume Next
+    Dim dirResult As String: dirResult = Dir(p)
+    On Error GoTo 0
+    If dirResult = "" Then
+        Application.ScreenUpdating = True
+        MsgBox "マスタファイルにアクセスできません。" & vbCrLf & _
+               "パス: " & p, vbCritical
+        Exit Function
+    End If
     
     On Error Resume Next
     Set wbT = Workbooks.Open(p, ReadOnly:=True)
