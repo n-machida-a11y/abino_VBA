@@ -428,8 +428,6 @@ Function ExecuteUpdateAndSearch() As Boolean
         End If
         targetRow = candidates(pickIdx)
         wsS.Range(CELL_IRAI_NO).Value = CStr(wsR.Cells(targetRow, 1).Value)
-        
-        wsS.Range(CELL_IRAI_NO).Value = selectedID
     End If
     
     Call TransferRowToSearchSheet(wsR, wsS, targetRow)
