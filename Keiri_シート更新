@@ -310,7 +310,12 @@ Public Function SyncAllDataToMaster(ByVal targetIraiNo As String, ByVal isNew As
     Set wbM = Workbooks.Open(mPath)
     On Error GoTo 0
     
-    If wbM Is Nothing Then Exit Sub
+    If wbM Is Nothing Then
+        MsgBox "マスタファイルを開けませんでした。" & vbCrLf & _
+               "他のユーザーが編集中の可能性があります。", vbCritical
+        Application.ScreenUpdating = True
+        Exit Function
+    End If
     
     Set wsM = wbM.Sheets(m_IRAI_RIREKI_SHEET_NAME)
     
@@ -321,8 +326,10 @@ Public Function SyncAllDataToMaster(ByVal targetIraiNo As String, ByVal isNew As
         Dim f As Range
         Set f = wsM.Columns("A").Find(targetIraiNo, LookAt:=xlWhole)
         If f Is Nothing Then
+            MsgBox "マスタ内に依頼NO [" & targetIraiNo & "] が見つかりませんでした。", vbExclamation
             wbM.Close False
-            Exit Sub
+            Application.ScreenUpdating = True
+            Exit Function
         End If
         targetRow = f.Row
     End If
