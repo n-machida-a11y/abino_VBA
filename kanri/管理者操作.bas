@@ -201,7 +201,7 @@ NextSheet:
     Set wbMaster = Nothing
 
     ' 反映成功したらスナップショットも新しいマスタ状態で更新しておく
-    Call マクロ_最新取得_静かに
+    Call SilentRefreshSnapshots
 
     Application.ScreenUpdating = True
     Application.DisplayAlerts = True
@@ -413,7 +413,7 @@ End Sub
 '================================================================================
 ' 反映直後に静かに最新取得（メッセージ無し、スナップショット再作成が目的）
 '================================================================================
-Private Sub マクロ_最新取得_静かに()
+Private Sub SilentRefreshSnapshots()
     Dim masterPath As String: masterPath = GetMasterPath()
     If Dir(masterPath) = "" Then Exit Sub
 
