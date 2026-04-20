@@ -14,34 +14,36 @@ Private Const CELL_KEIRI_NO As String = "B2"      ' 請求書番号(経理用)
 
 ' ■5行目エリア（主要項目）
 Private Const CELL_PROJ_NO As String = "A5"       ' 工事番号
-Private Const CELL_DATE_SUBMIT As String = "B5"   ' 提出日付
-Private Const CELL_DESTINATION As String = "C5"   ' 請求書提出先
+Private Const CELL_DATE_SUBMIT As String = "B5"   ' 請求書日付
+Private Const CELL_DESTINATION As String = "C5"   ' 請求宛名
 Private Const CELL_PROJ_NAME As String = "D5"     ' 工事名称
-Private Const CELL_AMOUNT As String = "E5"        ' 請負金額
+Private Const CELL_AMOUNT As String = "E5"        ' 請負金額(税込)
 Private Const CELL_STAFF As String = "F5"         ' 担当者
 
-' ■7行目エリア（工期・文言系）
+' ■7行目エリア（新レイアウト）
 Private Const CELL_TERM_START As String = "A7"    ' 工期 着手
 Private Const CELL_TERM_END As String = "B7"      ' 工期 完成
-Private Const CELL_TEXT_INVOICE As String = "C7"  ' 請求書記載文言
-Private Const CELL_NOTE_RECEIPT As String = "D7"  ' 領収書注意文
-Private Const CELL_NOTE_FEE As String = "E7"      ' 振込手数料注意文
-Private Const CELL_BANK_ACCOUNT As String = "F7"  ' 但陽信金口座指定
+Private Const CELL_DATE_DELIVERY As String = "C7" ' 引渡日 (旧G9)
+Private Const CELL_BANK_ACCOUNT As String = "D7"  ' 但陽信金口座指定 (旧F7)
+Private Const CELL_COMMENT As String = "E7"       ' 担当者引継ぎコメント (旧F9)
+Private Const CELL_DATE_CREATE As String = "F7"   ' 依頼書作成日 (旧A11)
 
 ' ■9行目エリア（要項・住所・詳細）
 Private Const CELL_REQ_ITEM As String = "A9"      ' 提出要項
-Private Const CELL_REQ_OTHER As String = "B9"     ' 提出要項(その他)
+Private Const CELL_ENCLOSURE As String = "B9"     ' 同封物 (旧E9)
 Private Const CELL_POST_CODE As String = "C9"     ' 郵便番号
-Private Const CELL_ADDRESS As String = "D9"       ' 提出先住所
-Private Const CELL_ENCLOSURE As String = "E9"     ' 同封物
-Private Const CELL_COMMENT As String = "F9"       ' 担当者引継ぎコメント
-Private Const CELL_DATE_DELIVERY As String = "G9" ' 引渡日(※工事完了日)
+Private Const CELL_ADDRESS As String = "D9"       ' 郵送先住所
+Private Const CELL_MEMO As String = "E9"          ' 経理メモ (旧C11)
+Private Const CELL_DATE_ISSUE As String = "F9"    ' 作成日 (旧B11)
 
 ' ■11行目エリア（管理情報）
-Private Const CELL_DATE_CREATE As String = "A11"  ' 依頼書作成日
-Private Const CELL_DATE_ISSUE As String = "B11"   ' 発行日
-Private Const CELL_MEMO As String = "C11"         ' 経理メモ
-Private Const CELL_HISTORY As String = "D11"      ' 操作履歴
+Private Const CELL_HISTORY As String = "A11"      ' 操作履歴 (旧D11)
+
+'--- 廃止フィールド（新レイアウトでは 依頼検索 に存在しない）---
+'   CELL_REQ_OTHER     (旧 B9, 提出要項(その他))
+'   CELL_TEXT_INVOICE  (旧 C7, 請求書記載文言)
+'   CELL_NOTE_RECEIPT  (旧 D7, 領収書注意文)
+'   CELL_NOTE_FEE      (旧 E7, 振込手数料注意文)
 
 
 '================================================================================
@@ -203,7 +205,7 @@ Private Sub WriteDataToRireki(wsRireki As Worksheet, wsSearch As Worksheet, targ
         
         .Cells(targetRow, 10).Value = wsSearch.Range(CELL_DATE_CREATE).Value
         .Cells(targetRow, 11).Value = wsSearch.Range(CELL_REQ_ITEM).Value
-        .Cells(targetRow, 12).Value = wsSearch.Range(CELL_REQ_OTHER).Value
+        ' col 12 (提出要項その他) 廃止につき書き込まない
         .Cells(targetRow, 13).Value = wsSearch.Range(CELL_ENCLOSURE).Value
         .Cells(targetRow, 14).Value = wsSearch.Range(CELL_DATE_SUBMIT).Value
         .Cells(targetRow, 15).Value = wsSearch.Range(CELL_DATE_DELIVERY).Value
@@ -211,10 +213,10 @@ Private Sub WriteDataToRireki(wsRireki As Worksheet, wsSearch As Worksheet, targ
         .Cells(targetRow, 17).Value = wsSearch.Range(CELL_POST_CODE).Value
         .Cells(targetRow, 18).Value = wsSearch.Range(CELL_ADDRESS).Value
         
-        .Cells(targetRow, 19).Value = wsSearch.Range(CELL_TEXT_INVOICE).Value
+        ' col 19 (請求書記載文言) 廃止につき書き込まない
         .Cells(targetRow, 20).Value = wsSearch.Range(CELL_COMMENT).Value
-        .Cells(targetRow, 21).Value = wsSearch.Range(CELL_NOTE_RECEIPT).Value
-        .Cells(targetRow, 22).Value = wsSearch.Range(CELL_NOTE_FEE).Value
+        ' col 21 (領収書注意文) 廃止につき書き込まない
+        ' col 22 (振込手数料注意文) 廃止につき書き込まない
         .Cells(targetRow, 23).Value = wsSearch.Range(CELL_BANK_ACCOUNT).Value
     End With
     
@@ -337,7 +339,7 @@ Public Function SyncAllDataToMaster(ByVal targetIraiNo As String, ByVal isNew As
         
         .Cells(targetRow, 10).Value = wsS.Range(CELL_DATE_CREATE).Value
         .Cells(targetRow, 11).Value = wsS.Range(CELL_REQ_ITEM).Value
-        .Cells(targetRow, 12).Value = wsS.Range(CELL_REQ_OTHER).Value
+        ' col 12 (提出要項その他) 廃止につき書き込まない
         .Cells(targetRow, 13).Value = wsS.Range(CELL_ENCLOSURE).Value
         .Cells(targetRow, 14).Value = wsS.Range(CELL_DATE_SUBMIT).Value
         .Cells(targetRow, 15).Value = wsS.Range(CELL_DATE_DELIVERY).Value
@@ -345,10 +347,10 @@ Public Function SyncAllDataToMaster(ByVal targetIraiNo As String, ByVal isNew As
         .Cells(targetRow, 17).Value = wsS.Range(CELL_POST_CODE).Value
         .Cells(targetRow, 18).Value = wsS.Range(CELL_ADDRESS).Value
         
-        .Cells(targetRow, 19).Value = wsS.Range(CELL_TEXT_INVOICE).Value
+        ' col 19 (請求書記載文言) 廃止につき書き込まない
         .Cells(targetRow, 20).Value = wsS.Range(CELL_COMMENT).Value
-        .Cells(targetRow, 21).Value = wsS.Range(CELL_NOTE_RECEIPT).Value
-        .Cells(targetRow, 22).Value = wsS.Range(CELL_NOTE_FEE).Value
+        ' col 21 (領収書注意文) 廃止につき書き込まない
+        ' col 22 (振込手数料注意文) 廃止につき書き込まない
         .Cells(targetRow, 23).Value = wsS.Range(CELL_BANK_ACCOUNT).Value
         
         .Cells(targetRow, 24).Value = wsS.Range(CELL_HISTORY).Value
@@ -458,8 +460,8 @@ End Function
 Private Sub ClearSearchSheet(wsS As Worksheet)
     wsS.Range(CELL_KEIRI_NO & "," & CELL_PROJ_NO & "," & CELL_PROJ_NAME & "," & CELL_AMOUNT).ClearContents
     wsS.Range(CELL_DESTINATION & "," & CELL_TERM_START & "," & CELL_TERM_END).ClearContents
-    wsS.Range(CELL_TEXT_INVOICE & "," & CELL_NOTE_RECEIPT & "," & CELL_NOTE_FEE & "," & CELL_BANK_ACCOUNT).ClearContents
-    wsS.Range(CELL_REQ_ITEM & "," & CELL_REQ_OTHER & "," & CELL_POST_CODE & "," & CELL_ADDRESS).ClearContents
+    wsS.Range(CELL_BANK_ACCOUNT).ClearContents
+    wsS.Range(CELL_REQ_ITEM & "," & CELL_POST_CODE & "," & CELL_ADDRESS).ClearContents
     wsS.Range(CELL_ENCLOSURE & "," & CELL_COMMENT & "," & CELL_DATE_DELIVERY).ClearContents
     wsS.Range(CELL_DATE_CREATE & "," & CELL_DATE_ISSUE).ClearContents
     wsS.Range(CELL_HISTORY & "," & CELL_MEMO).ClearContents
@@ -482,7 +484,7 @@ Private Sub TransferRowToSearchSheet(wsR As Worksheet, wsS As Worksheet, r As Lo
         
         .Range(CELL_DATE_CREATE).Value = wsR.Cells(r, 10).Value
         .Range(CELL_REQ_ITEM).Value = wsR.Cells(r, 11).Value
-        .Range(CELL_REQ_OTHER).Value = wsR.Cells(r, 12).Value
+        ' col 12 (提出要項その他) 廃止につき読まない
         .Range(CELL_ENCLOSURE).Value = wsR.Cells(r, 13).Value
         .Range(CELL_DATE_SUBMIT).Value = wsR.Cells(r, 14).Value
         .Range(CELL_DATE_DELIVERY).Value = wsR.Cells(r, 15).Value
@@ -490,10 +492,10 @@ Private Sub TransferRowToSearchSheet(wsR As Worksheet, wsS As Worksheet, r As Lo
         .Range(CELL_POST_CODE).Value = wsR.Cells(r, 17).Value
         .Range(CELL_ADDRESS).Value = wsR.Cells(r, 18).Value
         
-        .Range(CELL_TEXT_INVOICE).Value = wsR.Cells(r, 19).Value
+        ' col 19 (請求書記載文言) 廃止につき読まない
         .Range(CELL_COMMENT).Value = wsR.Cells(r, 20).Value
-        .Range(CELL_NOTE_RECEIPT).Value = wsR.Cells(r, 21).Value
-        .Range(CELL_NOTE_FEE).Value = wsR.Cells(r, 22).Value
+        ' col 21 (領収書注意文) 廃止につき読まない
+        ' col 22 (振込手数料注意文) 廃止につき読まない
         .Range(CELL_BANK_ACCOUNT).Value = wsR.Cells(r, 23).Value
         
         .Range(CELL_HISTORY).Value = wsR.Cells(r, 24).Value
