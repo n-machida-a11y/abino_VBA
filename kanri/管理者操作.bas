@@ -223,7 +223,7 @@ End Sub
 '================================================================================
 ' シート単位: 全上書きモード
 '================================================================================
-Private Function SyncSheetOverwrite(ByVal src As Worksheet, ByVal dst As Worksheet) As String
+Public Function SyncSheetOverwrite(ByVal src As Worksheet, ByVal dst As Worksheet) As String
     Call SafeUnprotect(dst)
     Call ClearAllFilters(dst)
     dst.Cells.Clear
@@ -245,56 +245,50 @@ End Function
 '   keyCol  : キー列文字 (例: "D")
 '   dataRow : データ開始行
 '================================================================================
-Private Function SyncSheetMerge( _
-        ByVal local As Worksheet, _
-        ByVal master As Worksheet, _
-        ByVal snap As Worksheet, _
-        ByVal keyCol As String, _
-        ByVal dataRow As Long _
-    ) As String
+Public Function SyncSheetMerge(ByVal localSh As Worksheet, ByVal masterSh As Worksheet, ByVal snapSh As Worksheet, ByVal keyCol As String, ByVal dataRow As Long) As String
 
     ' 各キー→行番号 のマップを作る
     Dim dictLocal As Object, dictMaster As Object, dictSnap As Object
-    Set dictLocal = BuildKeyMap(local, keyCol, dataRow)
-    Set dictMaster = BuildKeyMap(master, keyCol, dataRow)
-    If snap Is Nothing Then
+    Set dictLocal = BuildKeyMap(localSh, keyCol, dataRow)
+    Set dictMaster = BuildKeyMap(masterSh, keyCol, dataRow)
+    If snapSh Is Nothing Then
         Set dictSnap = CreateObject("Scripting.Dictionary")  ' 空（他者追加と区別不可）
     Else
-        Set dictSnap = BuildKeyMap(snap, keyCol, dataRow)
+        Set dictSnap = BuildKeyMap(snapSh, keyCol, dataRow)
     End If
 
-    Call SafeUnprotect(master)
+    Call SafeUnprotect(masterSh)
 
     Dim lastCol As Long
-    lastCol = local.UsedRange.Columns.Count
-    If master.UsedRange.Columns.Count > lastCol Then lastCol = master.UsedRange.Columns.Count
-    If Not snap Is Nothing Then
-        If snap.UsedRange.Columns.Count > lastCol Then lastCol = snap.UsedRange.Columns.Count
+    lastCol = localSh.UsedRange.Columns.Count
+    If masterSh.UsedRange.Columns.Count > lastCol Then lastCol = masterSh.UsedRange.Columns.Count
+    If Not snapSh Is Nothing Then
+        If snapSh.UsedRange.Columns.Count > lastCol Then lastCol = snapSh.UsedRange.Columns.Count
     End If
     If lastCol < 1 Then lastCol = 1
 
     Dim updated As Long, added As Long, deleted As Long, preserved As Long
     Dim k As Variant
 
-    ' 1. local にある = 編集か追加
+    ' 1. localSh にある = 編集か追加
     For Each k In dictLocal.Keys
         Dim srcRow As Long: srcRow = dictLocal(k)
         If dictMaster.Exists(k) Then
             ' 編集: masterの該当行をlocalで上書き
             Dim dstRow1 As Long: dstRow1 = dictMaster(k)
-            Call CopyRow(local, srcRow, master, dstRow1, lastCol)
+            Call CopyRow(localSh, srcRow, masterSh, dstRow1, lastCol)
             updated = updated + 1
         Else
             ' 追加: masterに新規行として追記
             Dim newRow As Long
-            newRow = GetLastDataRow(master, keyCol) + 1
+            newRow = GetLastDataRow(masterSh, keyCol) + 1
             If newRow < dataRow Then newRow = dataRow
-            Call CopyRow(local, srcRow, master, newRow, lastCol)
+            Call CopyRow(localSh, srcRow, masterSh, newRow, lastCol)
             added = added + 1
         End If
     Next k
 
-    ' 2. master にあるが local に無い = 削除 or 他者追加
+    ' 2. masterSh にあるが localSh に無い = 削除 or 他者追加
     Dim rowsToDelete As Collection: Set rowsToDelete = New Collection
     For Each k In dictMaster.Keys
         If Not dictLocal.Exists(k) Then
@@ -319,7 +313,7 @@ Private Function SyncSheetMerge( _
         Next j
         Call SortDescending(toDelete)
         For j = 1 To n
-            master.Rows(toDelete(j)).Delete
+            masterSh.Rows(toDelete(j)).Delete
         Next j
     End If
 
@@ -332,7 +326,7 @@ End Function
 '================================================================================
 ' ヘルパー: キー値 → 行番号 の辞書を作る
 '================================================================================
-Private Function BuildKeyMap(ByVal ws As Worksheet, ByVal keyCol As String, ByVal dataRow As Long) As Object
+Public Function BuildKeyMap(ByVal ws As Worksheet, ByVal keyCol As String, ByVal dataRow As Long) As Object
     Dim d As Object: Set d = CreateObject("Scripting.Dictionary")
     If ws Is Nothing Then Set BuildKeyMap = d: Exit Function
 
@@ -354,9 +348,7 @@ End Function
 '================================================================================
 ' ヘルパー: 行コピー（値と書式）
 '================================================================================
-Private Sub CopyRow(ByVal src As Worksheet, ByVal srcRow As Long, _
-                    ByVal dst As Worksheet, ByVal dstRow As Long, _
-                    ByVal lastCol As Long)
+Public Sub CopyRow(ByVal src As Worksheet, ByVal srcRow As Long, ByVal dst As Worksheet, ByVal dstRow As Long, ByVal lastCol As Long)
     If lastCol < 1 Then lastCol = 1
     src.Range(src.Cells(srcRow, 1), src.Cells(srcRow, lastCol)).Copy _
         Destination:=dst.Cells(dstRow, 1)
@@ -366,7 +358,7 @@ End Sub
 '================================================================================
 ' ヘルパー: 対象シートのキー列で最終データ行を得る
 '================================================================================
-Private Function GetLastDataRow(ByVal ws As Worksheet, ByVal keyCol As String) As Long
+Public Function GetLastDataRow(ByVal ws As Worksheet, ByVal keyCol As String) As Long
     GetLastDataRow = ws.Cells(ws.Rows.Count, keyCol).End(xlUp).Row
 End Function
 
@@ -374,7 +366,7 @@ End Function
 '================================================================================
 ' ヘルパー: Long配列を降順ソート
 '================================================================================
-Private Sub SortDescending(arr() As Long)
+Public Sub SortDescending(arr() As Long)
     Dim i As Long, j As Long, tmp As Long
     For i = LBound(arr) To UBound(arr) - 1
         For j = i + 1 To UBound(arr)
@@ -389,7 +381,7 @@ End Sub
 '================================================================================
 ' ヘルパー: srcシートの全内容をスナップショットシートに書く
 '================================================================================
-Private Sub WriteSnapshotFromSheet(ByVal src As Worksheet, ByVal baseName As String)
+Public Sub WriteSnapshotFromSheet(ByVal src As Worksheet, ByVal baseName As String)
     Dim snapName As String: snapName = SNAPSHOT_PREFIX & baseName
     Dim snapSh As Worksheet
 
@@ -415,7 +407,7 @@ End Sub
 '================================================================================
 ' 反映直後に静かに最新取得（メッセージ無し、スナップショット再作成が目的）
 '================================================================================
-Private Sub SilentRefreshSnapshots()
+Public Sub SilentRefreshSnapshots()
     Dim masterPath As String: masterPath = GetMasterPath()
     If Dir(masterPath) = "" Then Exit Sub
 
