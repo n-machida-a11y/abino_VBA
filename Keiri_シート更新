@@ -370,7 +370,15 @@ Public Function GetMasterPath() As String
         p = Trim(CStr(ThisWorkbook.Sheets(m_IRAI_RIREKI_SHEET_NAME).Range("G1").Value))
     End If
     On Error GoTo 0
-    GetMasterPath = p
+    ' 両端のダブルクォート("")や全角引用符を除去
+    ' 例えば G1 セルに「"Z:\...\工事番号管理表.xlsm"」と入っていても動くようにする
+    Do While Len(p) > 0 And (Left(p, 1) = Chr(34) Or Left(p, 1) = "“" Or Left(p, 1) = "”" Or Left(p, 1) = "「" Or Left(p, 1) = "」")
+        p = Mid(p, 2)
+    Loop
+    Do While Len(p) > 0 And (Right(p, 1) = Chr(34) Or Right(p, 1) = "“" Or Right(p, 1) = "”" Or Right(p, 1) = "「" Or Right(p, 1) = "」")
+        p = Left(p, Len(p) - 1)
+    Loop
+    GetMasterPath = Trim(p)
 End Function
 
 Function ExecuteUpdateAndSearch() As Boolean
