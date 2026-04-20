@@ -2,41 +2,34 @@ Attribute VB_Name = "管理者操作"
 Option Explicit
 
 '================================================================================
-' 管理者用 メイン操作モジュール
+' 管理者用 メイン操作モジュール（差分マージ版）
 '
-' ■ 使い方
-'   ・シート上にボタンを2つ配置してこのモジュールのマクロを割り当てる:
-'       ・マクロ_最新取得  → マスタからこのブックに全シートをコピー
-'       ・マクロ_マスタへ反映 → このブックの全シートをマスタへ書き戻し
-'
-' ■ 同期対象シート
-'   管理者設定用コード.bas の GetSyncSheetNames() で定義
+' ■ 動作
+'   ・最新取得時: マスタ内容をこのブックに転写し、同時に隠しスナップショットも作成
+'   ・反映時    : 3者比較（ローカル／マスタ／スナップショット）で差分マージ
+'                 → 管理者の編集・追加・削除を反映しつつ、他者が追加した行は保持
 '================================================================================
 
 
 '================================================================================
-' 【ボタン1】マスタから最新データを取得
-'  マスタファイルを読み取り専用で開き、対象シートの内容をこのブックに転写する
+' 【ボタン1】マスタから最新取得
 '================================================================================
 Public Sub マクロ_最新取得()
-    Dim masterPath As String
-    Dim wbMaster As Workbook
-    Dim sheetNames As Variant
-    Dim i As Long
-    Dim successCount As Long, skipCount As Long
-    Dim logText As String
-
-    masterPath = GetMasterPath()
+    Dim masterPath As String: masterPath = GetMasterPath()
     If Dir(masterPath) = "" Then
         MsgBox "マスタファイルにアクセスできません。" & vbCrLf & _
-               "パス: " & masterPath & vbCrLf & vbCrLf & _
-               "ネットワーク(Z:)の接続を確認してください。", vbCritical, "最新取得エラー"
+               "パス: " & masterPath, vbCritical, "最新取得エラー"
         Exit Sub
     End If
 
-    If MsgBox("マスタから最新データを取得します。" & vbCrLf & vbCrLf & _
-              "このブックの対象シートは上書きされます。" & vbCrLf & _
-              "よろしいですか？", vbYesNo + vbQuestion, "最新取得の確認") = vbNo Then Exit Sub
+    If MsgBox("マスタから最新データを取得します。" & vbCrLf & _
+              "このブックの対象シートとスナップショットは上書きされます。" & vbCrLf & vbCrLf & _
+              "よろしいですか？", vbYesNo + vbQuestion, "最新取得") = vbNo Then Exit Sub
+
+    Dim wbMaster As Workbook
+    Dim configs As Variant, cfg As Variant
+    Dim logText As String
+    Dim successCount As Long, skipCount As Long
 
     Application.ScreenUpdating = False
     Application.DisplayAlerts = False
@@ -44,18 +37,19 @@ Public Sub マクロ_最新取得()
 
     Set wbMaster = Workbooks.Open(fileName:=masterPath, ReadOnly:=True, UpdateLinks:=0)
 
-    sheetNames = GetSyncSheetNames()
-
-    For i = LBound(sheetNames) To UBound(sheetNames)
-        Dim sheetName As String: sheetName = CStr(sheetNames(i))
+    configs = GetSheetSyncConfig()
+    Dim i As Long
+    For i = LBound(configs) To UBound(configs)
+        cfg = configs(i)
+        Dim sheetName As String: sheetName = CStr(cfg(0))
 
         If Not SheetExistsIn(wbMaster, sheetName) Then
-            logText = logText & " - " & sheetName & " (マスタに存在せずスキップ)" & vbCrLf
+            logText = logText & " - " & sheetName & " (マスタに無し、スキップ)" & vbCrLf
             skipCount = skipCount + 1
             GoTo NextSheet
         End If
         If Not SheetExistsIn(ThisWorkbook, sheetName) Then
-            logText = logText & " - " & sheetName & " (ローカルに存在せずスキップ)" & vbCrLf
+            logText = logText & " - " & sheetName & " (ローカルに無し、スキップ)" & vbCrLf
             skipCount = skipCount + 1
             GoTo NextSheet
         End If
@@ -64,11 +58,10 @@ Public Sub マクロ_最新取得()
         Set srcSh = wbMaster.Sheets(sheetName)
         Set dstSh = ThisWorkbook.Sheets(sheetName)
 
-        ' 保護解除・フィルタクリア
         Call SafeUnprotect(dstSh)
         Call ClearAllFilters(dstSh)
 
-        ' 既存内容をクリア → マスタの使用範囲をそのままコピー
+        ' ローカル可視シートへコピー
         dstSh.Cells.Clear
         If srcSh.UsedRange.Cells.CountLarge > 0 Then
             srcSh.UsedRange.Copy
@@ -76,6 +69,9 @@ Public Sub マクロ_最新取得()
             dstSh.Range(srcSh.UsedRange.Address).PasteSpecial Paste:=xlPasteColumnWidths
         End If
         Application.CutCopyMode = False
+
+        ' スナップショットシートへもコピー（反映時の3者比較用）
+        Call WriteSnapshotFromSheet(srcSh, sheetName)
 
         successCount = successCount + 1
         logText = logText & " - " & sheetName & " (取得成功)" & vbCrLf
@@ -97,126 +93,346 @@ Cleanup:
     If Not wbMaster Is Nothing Then wbMaster.Close SaveChanges:=False
     Application.ScreenUpdating = True
     Application.DisplayAlerts = True
-    MsgBox "最新取得中にエラーが発生しました。" & vbCrLf & _
-           Err.Description, vbCritical, "最新取得エラー"
+    MsgBox "最新取得中にエラーが発生しました: " & vbCrLf & Err.Description, vbCritical
 End Sub
 
 
 '================================================================================
-' 【ボタン2】このブックの内容をマスタへ反映
-'  マスタファイルを書き込み可能で開き、対象シートの内容をマスタに転写する
+' 【ボタン2】マスタへ反映（差分マージ）
 '================================================================================
 Public Sub マクロ_マスタへ反映()
-    Dim masterPath As String
-    Dim wbMaster As Workbook
-    Dim sheetNames As Variant
-    Dim i As Long
-    Dim successCount As Long, skipCount As Long
-    Dim logText As String
-
-    masterPath = GetMasterPath()
+    Dim masterPath As String: masterPath = GetMasterPath()
     If Dir(masterPath) = "" Then
         MsgBox "マスタファイルにアクセスできません。" & vbCrLf & _
-               "パス: " & masterPath & vbCrLf & vbCrLf & _
-               "ネットワーク(Z:)の接続を確認してください。", vbCritical, "マスタ反映エラー"
+               "パス: " & masterPath, vbCritical, "反映エラー"
         Exit Sub
     End If
 
-    If MsgBox("このブックの内容をマスタに反映（上書き）します。" & vbCrLf & vbCrLf & _
-              "【注意】" & vbCrLf & _
-              " ・マスタの同名シートは内容が全置換されます" & vbCrLf & _
-              " ・他のユーザーがマスタを開いていると失敗します" & vbCrLf & _
-              " ・反映前に「最新取得」で同期しておくと安全です" & vbCrLf & vbCrLf & _
-              "本当に反映しますか？", vbYesNo + vbQuestion + vbDefaultButton2, "マスタ反映の確認") = vbNo Then Exit Sub
+    ' スナップショット存在確認
+    Dim configs As Variant: configs = GetSheetSyncConfig()
+    Dim i As Long, missingSnapshots As String
+    For i = LBound(configs) To UBound(configs)
+        Dim sn As String: sn = SNAPSHOT_PREFIX & CStr(configs(i)(0))
+        If Not SheetExistsIn(ThisWorkbook, sn) Then
+            If CStr(configs(i)(3)) = "merge" Then
+                missingSnapshots = missingSnapshots & " - " & CStr(configs(i)(0)) & vbCrLf
+            End If
+        End If
+    Next i
+    If missingSnapshots <> "" Then
+        If MsgBox("以下のシートでスナップショットが未作成です:" & vbCrLf & missingSnapshots & vbCrLf & _
+                  "差分マージができないため、他者の追加が失われる可能性があります。" & vbCrLf & vbCrLf & _
+                  "先に「最新取得」を実行することを強く推奨します。" & vbCrLf & vbCrLf & _
+                  "このまま進めますか？（全上書きフォールバック）", _
+                  vbYesNo + vbExclamation + vbDefaultButton2, "警告") = vbNo Then Exit Sub
+    End If
 
-    ' 他のExcelでマスタが既に開かれていないかチェック
+    If MsgBox("ローカルの変更をマスタへ反映します。" & vbCrLf & vbCrLf & _
+              "差分マージ方式:" & vbCrLf & _
+              " ・管理者の編集・追加・削除を反映" & vbCrLf & _
+              " ・取得後に他者が追加した行は保持" & vbCrLf & vbCrLf & _
+              "続行しますか？", vbYesNo + vbQuestion, "マスタへ反映") = vbNo Then Exit Sub
+
+    ' 他Excelで開かれていないかチェック
     Dim wb As Workbook
     For Each wb In Application.Workbooks
         If LCase(wb.FullName) = LCase(masterPath) Then
-            MsgBox "マスタファイルが既にこのExcelで開かれています。" & vbCrLf & _
-                   "閉じてから再実行してください。", vbCritical
+            MsgBox "マスタファイルが別のExcelウィンドウで開かれています。閉じてから再実行してください。", vbCritical
             Exit Sub
         End If
     Next wb
+
+    Dim wbMaster As Workbook
+    Dim logText As String
+    Dim successCount As Long, skipCount As Long
 
     Application.ScreenUpdating = False
     Application.DisplayAlerts = False
     On Error GoTo Cleanup
 
     Set wbMaster = Workbooks.Open(fileName:=masterPath, ReadOnly:=False, UpdateLinks:=0)
-
     If wbMaster.ReadOnly Then
-        MsgBox "マスタファイルを書き込み可能で開けませんでした。" & vbCrLf & _
-               "他のユーザーが編集中の可能性があります。", vbCritical
+        MsgBox "マスタファイルを書き込み可能で開けませんでした。他のユーザーが編集中の可能性があります。", vbCritical
         GoTo Cleanup
     End If
 
-    sheetNames = GetSyncSheetNames()
-
-    For i = LBound(sheetNames) To UBound(sheetNames)
-        Dim sheetName As String: sheetName = CStr(sheetNames(i))
+    For i = LBound(configs) To UBound(configs)
+        Dim cfg As Variant: cfg = configs(i)
+        Dim sheetName As String: sheetName = CStr(cfg(0))
+        Dim keyCol As String: keyCol = CStr(cfg(1))
+        Dim dataStartRow As Long: dataStartRow = CLng(cfg(2))
+        Dim mode As String: mode = CStr(cfg(3))
 
         If Not SheetExistsIn(wbMaster, sheetName) Then
-            logText = logText & " - " & sheetName & " (マスタに存在せずスキップ)" & vbCrLf
+            logText = logText & " - " & sheetName & " (マスタに無し、スキップ)" & vbCrLf
             skipCount = skipCount + 1
             GoTo NextSheet
         End If
         If Not SheetExistsIn(ThisWorkbook, sheetName) Then
-            logText = logText & " - " & sheetName & " (ローカルに存在せずスキップ)" & vbCrLf
+            logText = logText & " - " & sheetName & " (ローカルに無し、スキップ)" & vbCrLf
             skipCount = skipCount + 1
             GoTo NextSheet
         End If
 
-        Dim srcSh As Worksheet, dstSh As Worksheet
-        Set srcSh = ThisWorkbook.Sheets(sheetName)
-        Set dstSh = wbMaster.Sheets(sheetName)
-
-        ' マスタシートの保護解除・フィルタクリア
-        Call SafeUnprotect(dstSh)
-        Call ClearAllFilters(dstSh)
-
-        ' 既存内容をクリア → ローカルの使用範囲をコピー
-        dstSh.Cells.Clear
-        If srcSh.UsedRange.Cells.CountLarge > 0 Then
-            srcSh.UsedRange.Copy
-            dstSh.Range(srcSh.UsedRange.Address).PasteSpecial Paste:=xlPasteAllUsingSourceTheme
-            dstSh.Range(srcSh.UsedRange.Address).PasteSpecial Paste:=xlPasteColumnWidths
+        Dim ret As String
+        If mode = "overwrite" Or keyCol = "" Then
+            ret = SyncSheetOverwrite(ThisWorkbook.Sheets(sheetName), wbMaster.Sheets(sheetName))
+        Else
+            Dim snapSheet As Worksheet
+            If SheetExistsIn(ThisWorkbook, SNAPSHOT_PREFIX & sheetName) Then
+                Set snapSheet = ThisWorkbook.Sheets(SNAPSHOT_PREFIX & sheetName)
+            Else
+                Set snapSheet = Nothing
+            End If
+            ret = SyncSheetMerge( _
+                    ThisWorkbook.Sheets(sheetName), _
+                    wbMaster.Sheets(sheetName), _
+                    snapSheet, _
+                    keyCol, dataStartRow)
         End If
-        Application.CutCopyMode = False
 
-        ' マスタシートを再保護（元々の保護設定に従う・必要なシートのみ）
-        Select Case sheetName
-            Case "工事番号一覧", "依頼履歴", "その他マスタ"
-                Call SafeProtect(dstSh)
-            Case Else
-                ' その他のシートは保護せず（必要なら個別に追加）
-        End Select
-
+        logText = logText & " - " & sheetName & ": " & ret & vbCrLf
         successCount = successCount + 1
-        logText = logText & " - " & sheetName & " (反映成功)" & vbCrLf
 NextSheet:
     Next i
 
     wbMaster.Save
     wbMaster.Close SaveChanges:=False
     Set wbMaster = Nothing
+
+    ' 反映成功したらスナップショットも新しいマスタ状態で更新しておく
+    Call マクロ_最新取得_静かに
+
     Application.ScreenUpdating = True
     Application.DisplayAlerts = True
 
     MsgBox "マスタへの反映が完了しました。" & vbCrLf & vbCrLf & _
            "成功: " & successCount & " シート" & vbCrLf & _
            "スキップ: " & skipCount & " シート" & vbCrLf & vbCrLf & _
-           "詳細:" & vbCrLf & logText, vbInformation, "マスタ反映完了"
+           "詳細:" & vbCrLf & logText, vbInformation, "反映完了"
     Exit Sub
 
 Cleanup:
     If Not wbMaster Is Nothing Then wbMaster.Close SaveChanges:=False
     Application.ScreenUpdating = True
     Application.DisplayAlerts = True
-    MsgBox "マスタ反映中にエラーが発生しました。" & vbCrLf & _
-           Err.Description & vbCrLf & vbCrLf & _
-           "【対処】" & vbCrLf & _
-           " ・他ユーザーがマスタを開いていないか確認" & vbCrLf & _
-           " ・Z:が接続されているか確認" & vbCrLf & _
-           " ・問題解決後に再実行してください", vbCritical, "マスタ反映エラー"
+    MsgBox "反映中にエラーが発生しました: " & vbCrLf & Err.Description, vbCritical
+End Sub
+
+
+'================================================================================
+' シート単位: 全上書きモード
+'================================================================================
+Private Function SyncSheetOverwrite(ByVal src As Worksheet, ByVal dst As Worksheet) As String
+    Call SafeUnprotect(dst)
+    Call ClearAllFilters(dst)
+    dst.Cells.Clear
+    If src.UsedRange.Cells.CountLarge > 0 Then
+        src.UsedRange.Copy
+        dst.Range(src.UsedRange.Address).PasteSpecial Paste:=xlPasteAllUsingSourceTheme
+        dst.Range(src.UsedRange.Address).PasteSpecial Paste:=xlPasteColumnWidths
+    End If
+    Application.CutCopyMode = False
+    SyncSheetOverwrite = "全上書き完了"
+End Function
+
+
+'================================================================================
+' シート単位: 差分マージモード（キーベース3者比較）
+'   local   : 管理者のローカルシート（編集済み）
+'   master  : マスタシート（現在の本物）
+'   snap    : スナップショット（最新取得時点のマスタ）
+'   keyCol  : キー列文字 (例: "D")
+'   dataRow : データ開始行
+'================================================================================
+Private Function SyncSheetMerge( _
+        ByVal local As Worksheet, _
+        ByVal master As Worksheet, _
+        ByVal snap As Worksheet, _
+        ByVal keyCol As String, _
+        ByVal dataRow As Long _
+    ) As String
+
+    ' 各キー→行番号 のマップを作る
+    Dim dictLocal As Object, dictMaster As Object, dictSnap As Object
+    Set dictLocal = BuildKeyMap(local, keyCol, dataRow)
+    Set dictMaster = BuildKeyMap(master, keyCol, dataRow)
+    If snap Is Nothing Then
+        Set dictSnap = CreateObject("Scripting.Dictionary")  ' 空（他者追加と区別不可）
+    Else
+        Set dictSnap = BuildKeyMap(snap, keyCol, dataRow)
+    End If
+
+    Call SafeUnprotect(master)
+
+    Dim lastCol As Long
+    lastCol = Application.WorksheetFunction.Max( _
+                  local.UsedRange.Columns.Count, _
+                  master.UsedRange.Columns.Count, _
+                  IIf(snap Is Nothing, 1, snap.UsedRange.Columns.Count))
+
+    Dim updated As Long, added As Long, deleted As Long, preserved As Long
+    Dim k As Variant
+
+    ' 1. local にある = 編集か追加
+    For Each k In dictLocal.Keys
+        Dim srcRow As Long: srcRow = dictLocal(k)
+        If dictMaster.Exists(k) Then
+            ' 編集: masterの該当行をlocalで上書き
+            Dim dstRow1 As Long: dstRow1 = dictMaster(k)
+            Call CopyRow(local, srcRow, master, dstRow1, lastCol)
+            updated = updated + 1
+        Else
+            ' 追加: masterに新規行として追記
+            Dim newRow As Long
+            newRow = GetLastDataRow(master, keyCol) + 1
+            If newRow < dataRow Then newRow = dataRow
+            Call CopyRow(local, srcRow, master, newRow, lastCol)
+            added = added + 1
+        End If
+    Next k
+
+    ' 2. master にあるが local に無い = 削除 or 他者追加
+    Dim rowsToDelete As Collection: Set rowsToDelete = New Collection
+    For Each k In dictMaster.Keys
+        If Not dictLocal.Exists(k) Then
+            If dictSnap.Exists(k) Then
+                ' 取得時点にもあった → 管理者が削除した
+                rowsToDelete.Add dictMaster(k)
+                deleted = deleted + 1
+            Else
+                ' 取得時点には無かった → 他者が追加したので保持
+                preserved = preserved + 1
+            End If
+        End If
+    Next k
+
+    ' 削除は後ろから行う（行番号がズレないように）
+    Dim toDelete() As Long, n As Long: n = rowsToDelete.Count
+    If n > 0 Then
+        ReDim toDelete(1 To n)
+        Dim j As Long
+        For j = 1 To n
+            toDelete(j) = rowsToDelete(j)
+        Next j
+        Call SortDescending(toDelete)
+        For j = 1 To n
+            master.Rows(toDelete(j)).Delete
+        Next j
+    End If
+
+    Application.CutCopyMode = False
+    SyncSheetMerge = "編集:" & updated & " / 追加:" & added & _
+                     " / 削除:" & deleted & " / 他者追加保持:" & preserved
+End Function
+
+
+'================================================================================
+' ヘルパー: キー値 → 行番号 の辞書を作る
+'================================================================================
+Private Function BuildKeyMap(ByVal ws As Worksheet, ByVal keyCol As String, ByVal dataRow As Long) As Object
+    Dim d As Object: Set d = CreateObject("Scripting.Dictionary")
+    If ws Is Nothing Then Set BuildKeyMap = d: Exit Function
+
+    Dim lastRow As Long
+    lastRow = ws.Cells(ws.Rows.Count, keyCol).End(xlUp).Row
+    If lastRow < dataRow Then Set BuildKeyMap = d: Exit Function
+
+    Dim r As Long, v As String
+    For r = dataRow To lastRow
+        v = Trim(CStr(ws.Cells(r, keyCol).Value))
+        If v <> "" Then
+            If Not d.Exists(v) Then d.Add v, r
+        End If
+    Next r
+    Set BuildKeyMap = d
+End Function
+
+
+'================================================================================
+' ヘルパー: 行コピー（値と書式）
+'================================================================================
+Private Sub CopyRow(ByVal src As Worksheet, ByVal srcRow As Long, _
+                    ByVal dst As Worksheet, ByVal dstRow As Long, _
+                    ByVal lastCol As Long)
+    If lastCol < 1 Then lastCol = 1
+    src.Range(src.Cells(srcRow, 1), src.Cells(srcRow, lastCol)).Copy _
+        Destination:=dst.Cells(dstRow, 1)
+End Sub
+
+
+'================================================================================
+' ヘルパー: 対象シートのキー列で最終データ行を得る
+'================================================================================
+Private Function GetLastDataRow(ByVal ws As Worksheet, ByVal keyCol As String) As Long
+    GetLastDataRow = ws.Cells(ws.Rows.Count, keyCol).End(xlUp).Row
+End Function
+
+
+'================================================================================
+' ヘルパー: Long配列を降順ソート
+'================================================================================
+Private Sub SortDescending(arr() As Long)
+    Dim i As Long, j As Long, tmp As Long
+    For i = LBound(arr) To UBound(arr) - 1
+        For j = i + 1 To UBound(arr)
+            If arr(j) > arr(i) Then
+                tmp = arr(i): arr(i) = arr(j): arr(j) = tmp
+            End If
+        Next j
+    Next i
+End Sub
+
+
+'================================================================================
+' ヘルパー: srcシートの全内容をスナップショットシートに書く
+'================================================================================
+Private Sub WriteSnapshotFromSheet(ByVal src As Worksheet, ByVal baseName As String)
+    Dim snapName As String: snapName = SNAPSHOT_PREFIX & baseName
+    Dim snapSh As Worksheet
+
+    ' 既存スナップシートを取得 or 作成
+    If SheetExistsIn(ThisWorkbook, snapName) Then
+        Set snapSh = ThisWorkbook.Sheets(snapName)
+    Else
+        Set snapSh = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+        snapSh.Name = snapName
+    End If
+
+    On Error Resume Next
+    snapSh.Visible = xlSheetVeryHidden  ' 非表示（管理者からも見えない）
+    snapSh.Cells.Clear
+    If src.UsedRange.Cells.CountLarge > 0 Then
+        src.UsedRange.Copy snapSh.Range("A1")
+    End If
+    Application.CutCopyMode = False
+    On Error GoTo 0
+End Sub
+
+
+'================================================================================
+' 反映直後に静かに最新取得（メッセージ無し、スナップショット再作成が目的）
+'================================================================================
+Private Sub マクロ_最新取得_静かに()
+    Dim masterPath As String: masterPath = GetMasterPath()
+    If Dir(masterPath) = "" Then Exit Sub
+
+    Dim wbMaster As Workbook
+    On Error GoTo Cleanup
+    Set wbMaster = Workbooks.Open(fileName:=masterPath, ReadOnly:=True, UpdateLinks:=0)
+
+    Dim configs As Variant: configs = GetSheetSyncConfig()
+    Dim i As Long
+    For i = LBound(configs) To UBound(configs)
+        Dim sheetName As String: sheetName = CStr(configs(i)(0))
+        If SheetExistsIn(wbMaster, sheetName) Then
+            Call WriteSnapshotFromSheet(wbMaster.Sheets(sheetName), sheetName)
+        End If
+    Next i
+
+    wbMaster.Close SaveChanges:=False
+    Exit Sub
+
+Cleanup:
+    If Not wbMaster Is Nothing Then wbMaster.Close SaveChanges:=False
 End Sub
