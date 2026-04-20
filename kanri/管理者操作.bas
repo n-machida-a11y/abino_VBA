@@ -266,10 +266,12 @@ Private Function SyncSheetMerge( _
     Call SafeUnprotect(master)
 
     Dim lastCol As Long
-    lastCol = Application.WorksheetFunction.Max( _
-                  local.UsedRange.Columns.Count, _
-                  master.UsedRange.Columns.Count, _
-                  IIf(snap Is Nothing, 1, snap.UsedRange.Columns.Count))
+    lastCol = local.UsedRange.Columns.Count
+    If master.UsedRange.Columns.Count > lastCol Then lastCol = master.UsedRange.Columns.Count
+    If Not snap Is Nothing Then
+        If snap.UsedRange.Columns.Count > lastCol Then lastCol = snap.UsedRange.Columns.Count
+    End If
+    If lastCol < 1 Then lastCol = 1
 
     Dim updated As Long, added As Long, deleted As Long, preserved As Long
     Dim k As Variant
