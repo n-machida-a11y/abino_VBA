@@ -2,9 +2,10 @@ Option Explicit
 
 '================================================================================
 ' 設定・定数定義
+' IS_TEST_MODE / SHEET_IRAI_* / GetMasterPath などは Keiri_設定用コード (Config)
+' モジュールで一元管理されています。このモジュールでは定義しない。
 '================================================================================
-Public Const IS_TEST_MODE As Boolean = False
-Private Const m_TEST_FILE_PATH_FOR_TEST As String = "Z:\Users\n-machida\Desktop\工事番号管理表.xlsm"
+' シート名用の別名（既存コード互換のため）
 Public Const m_IRAI_RIREKI_SHEET_NAME As String = "依頼履歴"
 Public Const m_IRAI_SEARCH_SHEET_NAME As String = "依頼検索"
 
@@ -370,25 +371,8 @@ Public Function SyncAllDataToMaster(ByVal targetIraiNo As String, ByVal isNew As
     SyncAllDataToMaster = True  ' ここまで到達で成功
 End Function
 
-Public Function GetMasterPath() As String
-    Dim p As String
-    On Error Resume Next
-    If IS_TEST_MODE Then
-        p = m_TEST_FILE_PATH_FOR_TEST
-    Else
-        p = Trim(CStr(ThisWorkbook.Sheets(m_IRAI_RIREKI_SHEET_NAME).Range("G1").Value))
-    End If
-    On Error GoTo 0
-    ' 両端のダブルクォート("")や全角引用符を除去
-    ' 例えば G1 セルに「"Z:\...\工事番号管理表.xlsm"」と入っていても動くようにする
-    Do While Len(p) > 0 And (Left(p, 1) = Chr(34) Or Left(p, 1) = "“" Or Left(p, 1) = "”" Or Left(p, 1) = "「" Or Left(p, 1) = "」")
-        p = Mid(p, 2)
-    Loop
-    Do While Len(p) > 0 And (Right(p, 1) = Chr(34) Or Right(p, 1) = "“" Or Right(p, 1) = "”" Or Right(p, 1) = "「" Or Right(p, 1) = "」")
-        p = Left(p, Len(p) - 1)
-    Loop
-    GetMasterPath = Trim(p)
-End Function
+' GetMasterPath() は Keiri_設定用コード (Config モジュール) 側の
+' 同名関数を使う。重複定義を避けるためこちら側は削除済み。
 
 Function ExecuteUpdateAndSearch() As Boolean
     ExecuteUpdateAndSearch = False
