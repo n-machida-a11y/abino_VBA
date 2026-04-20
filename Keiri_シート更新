@@ -400,32 +400,34 @@ Function ExecuteUpdateAndSearch() As Boolean
         targetRow = candidates(1)
         
     Else
-        ' ★改修：ユーザーフォームを表示して選択させる
-        ' ※UserForm1が作成されていることが前提
-        Load UserForm1
-        
-        Call UserForm1.SetCandidates(candidates, wsR)
-        
-        UserForm1.Show ' ここで入力待ちになる
-        
-        If UserForm1.IsCancelled Then
-            Unload UserForm1
-            Exit Function ' キャンセルされたら終了
-        End If
-        
-        Dim selectedID As String
-        selectedID = UserForm1.selectedID
-        
-        Unload UserForm1
-        
-        Dim found As Range
-        Set found = wsR.Columns("A").Find(selectedID, LookAt:=xlWhole)
-        
-        If found Is Nothing Then
-            MsgBox "エラー：選択されたデータが見つかりません。", vbCritical
+        ' 複数候補があるので、ユーザーにどれを選ぶか聞く
+        ' UserForm 依存を避けるため、標準の InputBox で候補一覧を表示して番号で選んでもらう方式
+        Dim prompt As String, idx As Long
+        prompt = "複数の依頼NO候補が見つかりました。" & vbCrLf & _
+                 "選択したい番号を入力してOKを押してください:" & vbCrLf & vbCrLf
+        For idx = 1 To candidates.Count
+            prompt = prompt & idx & ": " & CStr(wsR.Cells(candidates(idx), 1).Value)
+            Dim proj As String: proj = CStr(wsR.Cells(candidates(idx), 5).Value) ' 工事番号
+            Dim nam As String: nam = CStr(wsR.Cells(candidates(idx), 6).Value)  ' 工事名称
+            If proj <> "" Then prompt = prompt & " [" & proj & "]"
+            If nam <> "" Then prompt = prompt & " " & nam
+            prompt = prompt & vbCrLf
+        Next idx
+
+        Dim picked As String
+        picked = InputBox(prompt, "依頼NOの選択", "1")
+        If picked = "" Then Exit Function  ' キャンセル or 空欄
+        If Not IsNumeric(picked) Then
+            MsgBox "番号（1〜" & candidates.Count & "）を入力してください。", vbExclamation
             Exit Function
         End If
-        targetRow = found.Row
+        Dim pickIdx As Long: pickIdx = CLng(picked)
+        If pickIdx < 1 Or pickIdx > candidates.Count Then
+            MsgBox "範囲外です（1〜" & candidates.Count & "）。", vbExclamation
+            Exit Function
+        End If
+        targetRow = candidates(pickIdx)
+        wsS.Range(CELL_IRAI_NO).Value = CStr(wsR.Cells(targetRow, 1).Value)
         
         wsS.Range(CELL_IRAI_NO).Value = selectedID
     End If
