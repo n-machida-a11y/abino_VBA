@@ -74,9 +74,8 @@ Public Sub 保存_印刷作業()
     newWb.SaveAs filePath, FileFormat:=xlOpenXMLWorkbook
     newWb.Close
 
-    On Error Resume Next
-    activeSht.Delete
-    On Error GoTo 0
+    ' 保存後もシートは削除せず、そのまま残す
+    ' (印刷し直しや再確認のため。不要になったらユーザー側で手動削除)
 
     Application.ScreenUpdating = initialScreen
     MsgBox "ファイルを保存しました。" & vbCrLf & "保存先：" & filePath, vbInformation
