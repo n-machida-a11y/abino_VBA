@@ -288,11 +288,16 @@ Private Sub TransferData(wsSource As Worksheet, wsDest As Worksheet, honorific A
     wsDest.Range(DEST_KEIRI_NO).Value = wsSource.Range(SRC_KEIRI_NO).Value
     
     Dim dSub As Variant: dSub = wsSource.Range(SRC_DATE_SUBMISSION).Value
+    ' 提出日付が空や非日付の場合は今日の日付をフォールバックとして使用
+    Dim useDate As Date
     If IsDate(dSub) Then
-        wsDest.Range(DEST_DATE_YEAR).Value = Year(dSub)
-        wsDest.Range(DEST_DATE_MONTH).Value = Month(dSub)
-        wsDest.Range(DEST_DATE_DAY).Value = Day(dSub)
+        useDate = CDate(dSub)
+    Else
+        useDate = Date
     End If
+    wsDest.Range(DEST_DATE_YEAR).Value = Year(useDate)
+    wsDest.Range(DEST_DATE_MONTH).Value = Month(useDate)
+    wsDest.Range(DEST_DATE_DAY).Value = Day(useDate)
     
     Dim dName As String: dName = Trim(wsSource.Range(SRC_DESTINATION).Value)
     wsDest.Range(DEST_DESTINATION).Value = dName
