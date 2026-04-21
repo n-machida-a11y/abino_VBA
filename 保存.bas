@@ -24,7 +24,12 @@ Public Sub 保存_印刷作業()
     Dim fileName As String, monthYear As String
 
     fileName = CStr(activeSht.Range(CELL_INVOICE_FILE_NAME).Value)
-    monthYear = CStr(activeSht.Range(CELL_MONTH_COL1).Value) & CStr(activeSht.Range(CELL_MONTH_COL2).Value)
+    ' 年月フォルダ名を「YYYY年M月」形式で構築（旧: 月+年 のおかしな順序だった）
+    Dim yearVal As String: yearVal = CStr(activeSht.Range(CELL_MONTH_COL2).Value)  ' AB3 = 年
+    Dim monthVal As String: monthVal = CStr(activeSht.Range(CELL_MONTH_COL1).Value)  ' AE3 = 月
+    If yearVal = "" Then yearVal = CStr(Year(Date))
+    If monthVal = "" Then monthVal = CStr(Month(Date))
+    monthYear = yearVal & "年" & monthVal & "月"
 
     ' ファイル名に使えない文字(\/:*?<>|)を除去
     fileName = SanitizeFileName(fileName)
@@ -39,10 +44,25 @@ Public Sub 保存_印刷作業()
     baseFolder = Environ("USERPROFILE") & "\Downloads"
     invoiceFolder = baseFolder & "\" & monthYear & "請求書"
 
-    On Error Resume Next
-    Dim dirExists As String: dirExists = Dir(invoiceFolder, vbDirectory)
-    On Error GoTo Cleanup
-    If dirExists = "" Then MkDir invoiceFolder
+    ' FileSystemObjectで確実にフォルダ作成（OneDrive等でMkDirが失敗する環境対策）
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If Not fso.FolderExists(baseFolder) Then
+        On Error Resume Next
+        fso.CreateFolder baseFolder
+        On Error GoTo Cleanup
+    End If
+    If Not fso.FolderExists(invoiceFolder) Then
+        On Error Resume Next
+        fso.CreateFolder invoiceFolder
+        On Error GoTo Cleanup
+    End If
+    If Not fso.FolderExists(invoiceFolder) Then
+        MsgBox "保存先フォルダが作成できませんでした。" & vbCrLf & _
+               "パス: " & invoiceFolder & vbCrLf & vbCrLf & _
+               "Downloadsフォルダの状態を確認してください。", vbCritical
+        Exit Sub
+    End If
 
     Dim newWb As Workbook
     Set newWb = Workbooks.Add
