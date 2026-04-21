@@ -41,7 +41,27 @@ Public Sub 保存_印刷作業()
         Exit Sub
     End If
 
-    baseFolder = Environ("USERPROFILE") & "\Downloads"
+    ' 保存先ベースフォルダ: 依頼検索!C1 セルの値を優先使用
+    ' C1 が空の場合は Downloads にフォールバック
+    On Error Resume Next
+    baseFolder = Trim(CStr(ThisWorkbook.Sheets("依頼検索").Range("C1").Value))
+    On Error GoTo Cleanup
+
+    ' 両端のダブルクォート除去（C1 に "..." で入力されている場合の対策）
+    Do While Len(baseFolder) > 0 And (Left(baseFolder, 1) = Chr(34) Or Left(baseFolder, 1) = "“" Or Left(baseFolder, 1) = "”")
+        baseFolder = Mid(baseFolder, 2)
+    Loop
+    Do While Len(baseFolder) > 0 And (Right(baseFolder, 1) = Chr(34) Or Right(baseFolder, 1) = "“" Or Right(baseFolder, 1) = "”")
+        baseFolder = Left(baseFolder, Len(baseFolder) - 1)
+    Loop
+    baseFolder = Trim(baseFolder)
+
+    ' C1 が空なら Downloads にフォールバック
+    If baseFolder = "" Then baseFolder = Environ("USERPROFILE") & "\Downloads"
+
+    ' 末尾が \ なら削除（連結時の二重 \ 防止）
+    If Right(baseFolder, 1) = "\" Then baseFolder = Left(baseFolder, Len(baseFolder) - 1)
+
     invoiceFolder = baseFolder & "\" & monthYear & "請求書"
 
     ' FileSystemObjectで確実にフォルダ作成（OneDrive等でMkDirが失敗する環境対策）
