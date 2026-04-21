@@ -23,13 +23,26 @@ Public Sub 保存_印刷作業()
     Dim baseFolder As String, invoiceFolder As String
     Dim fileName As String, monthYear As String
 
-    fileName = activeSht.Range(CELL_INVOICE_FILE_NAME).Value
-    monthYear = activeSht.Range(CELL_MONTH_COL1).Value & activeSht.Range(CELL_MONTH_COL2).Value
+    fileName = CStr(activeSht.Range(CELL_INVOICE_FILE_NAME).Value)
+    monthYear = CStr(activeSht.Range(CELL_MONTH_COL1).Value) & CStr(activeSht.Range(CELL_MONTH_COL2).Value)
+
+    ' ファイル名に使えない文字(\/:*?<>|)を除去
+    fileName = SanitizeFileName(fileName)
+    monthYear = SanitizeFileName(monthYear)
+
+    If Trim(fileName) = "" Then
+        MsgBox "ファイル名が取得できません。" & vbCrLf & _
+               "請求書シートのAK1セルにファイル名が設定されているか確認してください。", vbCritical
+        Exit Sub
+    End If
 
     baseFolder = Environ("USERPROFILE") & "\Downloads"
     invoiceFolder = baseFolder & "\" & monthYear & "請求書"
 
-    If Dir(invoiceFolder, vbDirectory) = "" Then MkDir invoiceFolder
+    On Error Resume Next
+    Dim dirExists As String: dirExists = Dir(invoiceFolder, vbDirectory)
+    On Error GoTo Cleanup
+    If dirExists = "" Then MkDir invoiceFolder
 
     Dim newWb As Workbook
     Set newWb = Workbooks.Add
@@ -75,8 +88,18 @@ Private Sub SyncInvoiceNoToMaster()
 
     On Error GoTo Cleanup
 
-    If Dir(mPath) = "" Then
-        MsgBox "マスタファイルが見つかりません。", vbCritical
+    ' 空パス対策：Dir("") はエラー52(ファイル名が不正)を投げる
+    If Trim(mPath) = "" Then
+        MsgBox "マスタファイルのパスが設定されていません。" & vbCrLf & _
+               "依頼履歴シートのG1セルにパスを設定してください。", vbCritical
+        GoTo Cleanup
+    End If
+    Dim dirChk As String
+    On Error Resume Next
+    dirChk = Dir(mPath)
+    On Error GoTo Cleanup
+    If dirChk = "" Then
+        MsgBox "マスタファイルが見つかりません。" & vbCrLf & "パス: " & mPath, vbCritical
         GoTo Cleanup
     End If
 
@@ -113,3 +136,16 @@ Cleanup:
     End If
 End Sub
 
+'================================================================================
+' ファイル名に使えない文字を安全な記号で置換
+'================================================================================
+Private Function SanitizeFileName(ByVal name As String) As String
+    Dim bad As String, i As Long, ch As String
+    bad = "\/:*?""<>|"
+    Dim result As String: result = name
+    For i = 1 To Len(bad)
+        ch = Mid(bad, i, 1)
+        result = Replace(result, ch, "_")
+    Next i
+    SanitizeFileName = Trim(result)
+End Function
