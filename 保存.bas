@@ -87,12 +87,14 @@ Public Sub 保存_印刷作業()
     Dim newWb As Workbook
     Set newWb = Workbooks.Add
     activeSht.Copy Before:=newWb.Sheets(1)
+    Application.DisplayAlerts = False  ' シート削除の確認ダイアログを抑制
     newWb.Sheets(1).Delete
+    Application.DisplayAlerts = True
 
     Dim filePath As String
     filePath = invoiceFolder & "\" & fileName & ".xlsx"
     newWb.SaveAs filePath, FileFormat:=xlOpenXMLWorkbook
-    newWb.Close
+    newWb.Close SaveChanges:=False
 
     ' 保存後もシートは削除せず、そのまま残す
     ' (印刷し直しや再確認のため。不要になったらユーザー側で手動削除)
