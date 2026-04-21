@@ -64,7 +64,17 @@ Public Sub 保存_印刷作業()
 
 Cleanup:
     Application.ScreenUpdating = initialScreen
-    MsgBox "エラーが発生しました：" & Err.Description, vbCritical
+    Dim diag As String
+    diag = "エラーが発生しました。" & vbCrLf & vbCrLf & _
+           "【エラー詳細】" & vbCrLf & _
+           " 番号: " & Err.Number & vbCrLf & _
+           " 内容: " & Err.Description & vbCrLf & vbCrLf & _
+           "【処理中の値】" & vbCrLf & _
+           " ファイル名(AK1): [" & fileName & "]" & vbCrLf & _
+           " 月年(AE3&AB3): [" & monthYear & "]" & vbCrLf & _
+           " 保存フォルダ: [" & invoiceFolder & "]" & vbCrLf & _
+           " 保存パス: [" & filePath & "]"
+    MsgBox diag, vbCritical
 End Sub
 
 '================================================================================
