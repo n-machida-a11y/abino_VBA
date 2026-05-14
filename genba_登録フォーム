@@ -418,28 +418,31 @@ Private Function CreateNewKoujiBangou(ByVal wsTarget As Worksheet, ByVal wsMaste
         CreateNewKoujiBangou = "ERROR"
         Exit Function
     End If
-    staffNumberValue = wsMaster.Cells(matchRow, MASTER_COL_STAFF_NO).Value
+    staffNumberValue = wsMaster.Cells(matchRow, MASTER_COL_STAFF_NO).Value  ' 行データ用に取得（工事番号には使わない）
 
-    ' 工事番号のプレフィックス（接頭辞）を作成 (例: "03-2401-")
-    prefix = "03-" & Right(CStr(inputYearShort), 2) & Format(staffNumberValue, "00") & "-"
+    ' 担当者番号は工事番号に含めない（2026/6/1〜の新ルール）
+    '   旧: "03-YYZZ-NNN" (YY=年度, ZZ=担当者番号, NNN=3桁通し番号)
+    '   新: "03-YY-NNNNNN" (YY=年度, NNNNNN=6桁通し番号)
+    prefix = "03-" & Right(CStr(inputYearShort), 2) & "-"  ' 例: "03-26-"
 
-    ' 同じプレフィックスを持つ既存の工事番号から、末尾3桁の最大値を探す
+    ' 同じプレフィックスを持つ既存の工事番号から、6桁通し番号の最大値を探す
     maxZZZ = 0
     For r = 1 To wsTarget.Cells(wsTarget.Rows.count, COL_KOUJI_BANGO).End(xlUp).Row
         koujiBangou = CStr(wsTarget.Cells(r, COL_KOUJI_BANGO).Value)
         ' プレフィックスが一致するかどうか
         If Left(koujiBangou, Len(prefix)) = prefix Then
             Dim existingZZZ As String
-            existingZZZ = Right(koujiBangou, 3) ' 末尾3桁を取得
-            ' 3桁が数字なら、現在の最大値と比較して更新
+            ' プレフィックスより後ろの部分（6桁通し番号）を取得
+            existingZZZ = Mid(koujiBangou, Len(prefix) + 1)
+            ' 数字なら、現在の最大値と比較して更新
             If IsNumeric(existingZZZ) Then
                 If CLng(existingZZZ) > maxZZZ Then maxZZZ = CLng(existingZZZ)
             End If
         End If
     Next r
 
-    ' 「プレフィックス」＋「最大値+1」で新しい工事番号を作成 (例: "03-2401-005")
-    CreateNewKoujiBangou = prefix & Format(maxZZZ + 1, "000")
+    ' 「プレフィックス」＋「最大値+1」で新しい工事番号を作成 (例: "03-26-000005")
+    CreateNewKoujiBangou = prefix & Format(maxZZZ + 1, "000000")  ' 6桁通し番号
 End Function
 
 ' フォームの入力データをシートに転記するサブルーチン
